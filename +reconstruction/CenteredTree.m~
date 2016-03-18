@@ -1,0 +1,20 @@
+%{
+reconstruction.CenteredTree (computed) # center the tree structure with the cell bodies
+->reconstruction.Tree
+-----
+cellbody_coords : blob      # coordinates of the cell body, center of mass
+cent_coords     : longblob  # coordinates of the cell, centered relative to the cell bodies
+center_tree_ts=CURRENT_TIMESTAMP   : timestamp # automatic
+
+%}
+
+classdef CenteredTree < dj.Relvar & ''
+	methods
+
+		function makeTuples(self, key)
+		%!!! compute missing fields for key here
+			self.insert(key)
+		end
+	end
+
+end
