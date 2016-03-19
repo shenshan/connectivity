@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from cortical_map.utils import rasterize, plot_cells, spin_shuffle, compute_overlap_density
 from . import connectivity as conn
+from itertools import product
 
 schema = dj.schema('shan_reconstruction', locals())
 
@@ -44,67 +45,100 @@ class DensityParameters(dj.Lookup):
              cut_compensation=1)
     ]
 
-
 @schema
-class OrthoOverlap(dj.Computed):
+class CellTypePair(dj.Lookup):
     definition = """
-    -> conn.Distance
-    -> DensityParameters
+    # table with cell type name pairs fetched from CellType
+
+    cell_type_from      : varchar(256)
+    cell_type_to        : varchar(256)
     ---
-    d           : longblob # distance to the connecting line between two neurons
-    p           : longblob # overlap density along that line
     """
 
     @property
-    def populated_from(self):
-        return CellType().project(ctn_from='cell_type_name') * CellType().project(
-            ctn_to='cell_type_name') * DensityParameters()
+    def contents(self):
+        ct = CellType().fetch['cell_type_name']
+        yield from product(ct,ct)
+
+@schema
+class OverlapGroup(dj.Computed):
+    definition = """
+    # Overlap densities grouping table
+    -> CellTypePair
+    -> DensityParameters
+    ---
+    """
+
+    class OrthoOverlapDensity(dj.Part):
+        definition = """
+        # overlap densities for a particular cell type pair and distance
+        -> OverlapGroup
+        -> conn.Distance
+        ---
+        d           : longblob # distance to the connecting line between two neurons
+        p           : longblob # overlap density along that line
+        """
+
 
     def _make_tuples(self, key):
+        # get identifiers for different regions
         AXON = (CellRegion() & dict(cell_region_name='axon')).fetch1['cell_region_id']
         DENDRITE = (CellRegion() & dict(cell_region_name='dendrite')).fetch1['cell_region_id']
 
+        # get parameters for density estimation
         raster_resolution, bin_width, cell_offset, multiplication_factor, cut_compensation = \
             (DensityParameters() & key).fetch1['raster_resolution','bin_width',
                                                'cell_offset','multiplication_factor', 'cut_compensation']
-        layer_from, morph_from = (CellType() & dict(cell_type_name=key['ctn_from'])).fetch1['layer', 'cell_type_morph']
-        cells_from = (conn.ConnectMembership() * conn.Cell()
-                      & dict(role='from', cell_layer=layer_from, cell_type_morph=morph_from)
-                      ).project(cell_id_from='cell_id')
-        X_from, region_from = OrthoOverlap.load_cells(
-            Tree() * CellType() & dict(layer=layer_from, cell_type_morph=morph_from),
-            resolution=raster_resolution, correct_cut=cut_compensation)
 
-        layer_to, morph_to = (CellType() & dict(cell_type_name=key['ctn_to'])).fetch1['layer', 'cell_type_morph']
-        cells_to = (conn.ConnectMembership() * conn.Cell()
-                    & dict(role='to', cell_layer=layer_to, cell_type_morph=morph_to)
-                        ).project( cell_id_to='cell_id')
-        X_to, region_to = OrthoOverlap.load_cells(Tree() * CellType() & dict(layer=layer_to, cell_type_morph=morph_to),
-                                                  resolution=raster_resolution, correct_cut=cut_compensation)
+        # load all cells from the particular pair of cell types
+        X, region, cells = {}, {}, {}
+        for role in ('from','to'):
+            layer, morph = (CellType() & dict(cell_type_name=key['cell_type_' + role])).fetch1['layer', 'cell_type_morph']
+            cells[role] = (conn.ConnectMembership() * conn.Cell()
+                          & dict(role=role, cell_layer=layer, cell_type_morph=morph)
+                          ).project(**{('cell_id_' +role):'cell_id'})
+            X[role], region[role] = OverlapGroup.load_cells(Tree() * CellType()
+                                                            & dict(layer=layer, cell_type_morph=morph),
+                    resolution=raster_resolution, correct_cut=cut_compensation)
 
 
-        keys, offset_x, offset_y = (conn.Distance() * cells_from * cells_to).fetch[dj.key, 'delta_x', 'delta_y']
-        offsets = np.c_[offset_x, -cell_offset * np.ones_like(offset_x), offset_y]
+        # get deltas
+        keys, delta_x, delta_y = (conn.Distance() * cells['from'] * cells['to']).fetch[dj.key, 'delta_x', 'delta_y']
+        offsets = np.c_[delta_x, -cell_offset * np.ones_like(delta_x), delta_y]
 
 
-        fig, ax = plot_cells(X_from, X_to, offsets[0], dict(color='silver', label=key['ctn_from']),
-                             dict(color='skyblue', label=key['ctn_to']))
-        fig.savefig('{ctn_from}_to_{ctn_to}.png'.format(**key))
+        # save a control figure
+        fig, ax = plot_cells(X['from'], X['to'], offsets[0], dict(color='silver', label=key['cell_type_from']),
+                             dict(color='skyblue', label=key['cell_type_to']))
+        fig.savefig('{cell_type_from}_to_{cell_type_to}.png'.format(**key))
 
 
-        X_from = spin_shuffle(X_from, copy=multiplication_factor)
-        X_to = spin_shuffle(X_to, copy=multiplication_factor)
+        # shuffle by rotation around z-axis
+        X['from'] = spin_shuffle(X['from'], copy=multiplication_factor)
+        X['to'] = spin_shuffle(X['to'], copy=multiplication_factor)
 
+        # insert grouping key
+        self.insert1(key)
+        part = OverlapGroup.OrthoOverlapDensity()
+
+        # insert an element in part (sub) table for each distance between cells of that type
         for k, delta in zip(keys, offsets):
-            H, E = compute_overlap_density(X_from[region_from == AXON], X_to[region_to == DENDRITE], bin_width, delta)
+
+            H, E = compute_overlap_density(X['from'][region['from'] == AXON], X['to'][region['to'] == DENDRITE], bin_width, delta)
+
+            # compute bin centers along y-axis and only get positive side
             y = E[1]
             y = 0.5 * (y[1:] + y[:-1])
             idx = y > 0
+
+            # marginalize density
             p = H[:,idx,:].sum(axis=(0,2))
-            ins_key = (conn.Distance() * DensityParameters() & k).project().fetch1()
-            ins_key['p'] = p
-            ins_key['d'] = y[idx]
-            self.insert1(ins_key)
+            key.update({f:k[f] for f in k.dtype.fields})
+            key.pop('cell_id_from')
+            key.pop('cell_id_to')
+            key['p'] = p
+            key['d'] = y[idx]
+            part.insert1(ins_key)
 
 
     @staticmethod
@@ -137,7 +171,6 @@ class OrthoOverlap(dj.Computed):
 
             X, region = rasterize(node_coords, connected_pairs, region, resolution)
             if correct_cut:
-                print("correcting cut")
                 ymax = X[:,1].max()
                 idx = X[:,1] <= -ymax
                 tmp  = X[idx, :]
