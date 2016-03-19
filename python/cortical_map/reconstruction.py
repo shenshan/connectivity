@@ -138,7 +138,7 @@ class OverlapGroup(dj.Computed):
             key.pop('cell_id_to')
             key['p'] = p
             key['d'] = y[idx]
-            part.insert1(ins_key)
+            part.insert1(key)
 
 
     @staticmethod
