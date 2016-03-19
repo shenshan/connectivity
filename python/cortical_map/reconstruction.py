@@ -64,22 +64,23 @@ class OrthoOverlap(dj.Computed):
         AXON = (CellRegion() & dict(cell_region_name='axon')).fetch1['cell_region_id']
         DENDRITE = (CellRegion() & dict(cell_region_name='dendrite')).fetch1['cell_region_id']
 
-        raster_resolution, bin_width, cell_offset, multiplication_factor = \
-            (DensityParameters() & key).fetch1['raster_resolution','bin_width', 'cell_offset','multiplication_factor']
+        raster_resolution, bin_width, cell_offset, multiplication_factor, cut_compensation = \
+            (DensityParameters() & key).fetch1['raster_resolution','bin_width',
+                                               'cell_offset','multiplication_factor', 'cut_compensation']
         layer_from, morph_from = (CellType() & dict(cell_type_name=key['ctn_from'])).fetch1['layer', 'cell_type_morph']
         cells_from = (conn.ConnectMembership() * conn.Cell()
                       & dict(role='from', cell_layer=layer_from, cell_type_morph=morph_from)
                       ).project(cell_id_from='cell_id')
         X_from, region_from = OrthoOverlap.load_cells(
             Tree() * CellType() & dict(layer=layer_from, cell_type_morph=morph_from),
-            resolution=raster_resolution)
+            resolution=raster_resolution, correct_cut=cut_compensation)
 
         layer_to, morph_to = (CellType() & dict(cell_type_name=key['ctn_to'])).fetch1['layer', 'cell_type_morph']
         cells_to = (conn.ConnectMembership() * conn.Cell()
                     & dict(role='to', cell_layer=layer_to, cell_type_morph=morph_to)
                         ).project( cell_id_to='cell_id')
         X_to, region_to = OrthoOverlap.load_cells(Tree() * CellType() & dict(layer=layer_to, cell_type_morph=morph_to),
-                                                  resolution=raster_resolution)
+                                                  resolution=raster_resolution, correct_cut=cut_compensation)
 
 
         keys, offset_x, offset_y = (conn.Distance() * cells_from * cells_to).fetch[dj.key, 'delta_x', 'delta_y']
@@ -107,7 +108,7 @@ class OrthoOverlap(dj.Computed):
 
 
     @staticmethod
-    def load_cells(trees, resolution=.5):
+    def load_cells(trees, resolution=.5, correct_cut=False):
         """
         Loads cells from the database
         :param cell_type: string containing layer and cell type morphology
@@ -132,15 +133,17 @@ class OrthoOverlap(dj.Computed):
                 continue
             mu = np.mean(node_coords[region == CELLBODY, :], axis=0)
             node_coords -= mu
-            #----------------------------------
-            # TODO: Remove this later
-            from IPython import embed
-            embed()
-            exit()
-            #----------------------------------
 
 
             X, region = rasterize(node_coords, connected_pairs, region, resolution)
+            if correct_cut:
+                print("correcting cut")
+                ymax = X[:,1].max()
+                idx = X[:,1] <= -ymax
+                tmp  = X[idx, :]
+                tmp[:,1] *= -1
+                X = np.vstack((X, tmp))
+                region = np.hstack((region, region[idx]))
 
             cells.append(X)
             regions.append(region)
