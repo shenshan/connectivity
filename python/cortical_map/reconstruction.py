@@ -113,10 +113,12 @@ class OverlapGroup(dj.Computed):
         fig.savefig('{cell_type_from}_to_{cell_type_to}.png'.format(**key))
 
 
-        # shuffle by rotation around z-axis
+        # shuffle by rotation around z-axis and increase data volume
         X['from'] = spin_shuffle(X['from'], copy=multiplication_factor)
         X['to'] = spin_shuffle(X['to'], copy=multiplication_factor)
-
+        for role in region:
+            region[role] = np.tile(region[role], multiplication_factor)
+            
         # insert grouping key
         self.insert1(key)
         part = OverlapGroup.OrthoOverlapDensity()
