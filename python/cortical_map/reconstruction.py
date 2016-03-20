@@ -102,11 +102,16 @@ class OverlapGroup(dj.Computed):
                     resolution=raster_resolution, correct_cut=cut_compensation)
 
 
+        # when there are no distances
+        if not conn.Distance() * cells['from'] * cells['to']:
+            self.insert1(key)
+            return
+        
         # get deltas
         keys, delta_x, delta_y = (conn.Distance() * cells['from'] * cells['to']).fetch[dj.key, 'delta_x', 'delta_y']
         offsets = np.c_[delta_x, -cell_offset * np.ones_like(delta_x), delta_y]
 
-
+        
         # save a control figure
         fig, ax = plot_cells(X['from'], X['to'], offsets[0], dict(color='silver', label=key['cell_type_from']),
                              dict(color='skyblue', label=key['cell_type_to']))
