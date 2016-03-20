@@ -24,7 +24,7 @@ class CellRegion(dj.Lookup):
     """
 
     contents = [
-        (1, 'dendrite'), (2, 'cellbody'), (3, 'axon')
+        (1, 'axon'), (2, 'cellbody'), (3, 'dendrite')
     ]
 
 
