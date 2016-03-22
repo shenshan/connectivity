@@ -93,7 +93,16 @@ class OverlapGroup(dj.Computed):
         # load all cells from the particular pair of cell types
         X, region, cells = {}, {}, {}
         for role in ('from','to'):
-            layer, morph = (CellType() & dict(cell_type_name=key['cell_type_' + role])).fetch1['layer', 'cell_type_morph']
+            try:
+                layer, morph = (CellType() & dict(cell_type_name=key['cell_type_' + role])).fetch1['layer', 'cell_type_morph']
+            except:
+                #----------------------------------
+                # TODO: Remove this later
+                from IPython import embed
+                embed()
+                exit()
+                #----------------------------------
+
             cells[role] = (conn.ConnectMembership() * conn.Cell()
                           & dict(role=role, cell_layer=layer, cell_type_morph=morph)
                           ).project(**{('cell_id_' +role):'cell_id'})
@@ -117,7 +126,7 @@ class OverlapGroup(dj.Computed):
                              dict(color='skyblue', label=key['cell_type_to']))
         fig.savefig('{cell_type_from}_to_{cell_type_to}.png'.format(**key))
 
-
+        plt.close(fig)
         # shuffle by rotation around z-axis and increase data volume
         X['from'] = spin_shuffle(X['from'], copy=multiplication_factor)
         X['to'] = spin_shuffle(X['to'], copy=multiplication_factor)
