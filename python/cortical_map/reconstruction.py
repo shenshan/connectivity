@@ -156,17 +156,28 @@ class OverlapGroup(dj.Computed):
                                                             & dict(layer=layer, cell_type_morph=morph),
                                                             resolution=raster_resolution, correct_cut=cut_compensation)
 
-        # when there are no distances
         if not conn.Distance() * cells['from'] * cells['to']:
-            # self.insert1(key)
+            self.insert1(key)
             return
 
         # get deltas
         keys, delta_x, delta_y = (conn.Distance() * cells['from'] * cells['to']).fetch[dj.key, 'delta_x', 'delta_y']
         offsets = np.c_[delta_x, -cell_offset * np.ones_like(delta_x), delta_y]
 
-        # save a control figure
-        fig, ax = plot_cells(X['from'], X['to'], offsets[0], dict(color=sns.xkcd_rgb['neon pink'], label=key['cell_type_from']),
+        # save control figures
+        if len(delta_x) > 1:
+            sns.set(style="ticks")
+            sns.jointplot(delta_x, delta_y, kind="scatter")
+            plt.gca().set_xlabel(r'$\Delta$ lateral')
+            plt.gca().set_ylabel(r'$\Delta$ depth')
+            plt.gcf().suptitle('{cell_type_from} to {cell_type_to}'.format(**key))
+            plt.gcf().tight_layout()
+            plt.gcf().savefig('{cell_type_from}_to_{cell_type_to}_deltahist.png'.format(**key))
+
+            plt.close(plt.gcf())
+
+        fig, ax = plot_cells(X['from'], X['to'], offsets[0],
+                             dict(color=sns.xkcd_rgb['neon pink'], label=key['cell_type_from']),
                              dict(color=sns.xkcd_rgb['neon blue'], label=key['cell_type_to']))
         fig.savefig('{cell_type_from}_to_{cell_type_to}.png'.format(**key))
         plt.close(fig)
@@ -261,27 +272,22 @@ class OverlapGroup(dj.Computed):
         D = gr.agg({'p': lambda x: np.mean(x, axis=0)[1:].sum()})  # TODO: replace 1: at some point
         Q = 1 - D / D0
 
+        labels = ['L1 SBC-like', 'L1 eNGC', 'L23 MC', 'L23 NGC', 'L23 BTC', 'L23 BPC', 'L23 DBC', 'L23 BC', 'L23 ChC',
+                  'L23 Pyr', 'L5 MC', 'L5 NGC', 'L5 BC', 'L5 SC', 'L5 HEC', 'L5 DC', 'L5 Pyr']
+
+
         P2 = (P / Q).fillna(0)
-        P2 = P2.unstack()
+        P = P.unstack().loc[labels][list(product(['p'],labels))]
+        P2 = P2.unstack().loc[labels][list(product(['p'],labels))]
 
-        P = P.unstack()
+        fig, axes = plot_connections(P,P2, vmax=1, cmin=0, cmax=1)
+        axes['matrix'][0].set_title('uncorrected')
+        axes['matrix'][1].set_title('corrected')
+        fig.tight_layout()
 
-        plot_connections(P.as_matrix(), P.index)
-        plot_connections(P2.as_matrix(), P2.index)
         # ----------------------------------
         # TODO: Remove this later
         from IPython import embed
         embed()
         exit()
         # ----------------------------------
-
-
-        # for group in (self & dict(density_param_id=density_param_id)).fetch.as_dict:
-        #     d,p = (OverlapGroup.OrthoOverlapDensity() & group).fetch['d','p']
-        #     #----------------------------------
-        #
-        #     # TODO: Remove this later
-        #     from IPython import embed
-        #     embed()
-        #     exit()
-        #     #----------------------------------

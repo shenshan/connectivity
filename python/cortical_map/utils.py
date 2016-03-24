@@ -122,6 +122,7 @@ def extended_hinton(ax, V, C, vmax=None, cmin=None, cmax=None, cmap=None, matrix
     ax.patch.set_facecolor([0, 0, 0, 0])
 
     for (x, y), w in np.ndenumerate(V):
+
         s = C[x, y]
         color = cmap(cnorm(s))  # cmap(s / cmax)
         size = np.abs(w / vmax)
@@ -137,38 +138,56 @@ def extended_hinton(ax, V, C, vmax=None, cmin=None, cmax=None, cmap=None, matrix
             pass
     #ax.autoscale_view()
     #ax.invert_yaxis()
-    return cnorm
+    return cnorm, cmapable
 
-def plot_connections(P, labels, vmax=None):
-    colors = ["black", "azure","apple","golden yellow",   "neon pink"]
-    cmap = sns.blend_palette(sns.xkcd_palette(colors), as_cmap=True)
+def plot_connections(P, Q, vmax=None, cmin=None, cmax=None):
+    # colors = ["black", "azure","apple","golden yellow",   "neon pink"]
+    # cmap = sns.blend_palette(sns.xkcd_palette(colors), as_cmap=True)
+    cmap = plt.cm.get_cmap('viridis')
 
     sns.set_style('whitegrid')
-    sns.set_context('paper',rc={"lines.linewidth": 2, 'font.size':12, 'font.family':'Helvetica'})
-    fig = plt.figure(figsize=(4.6,4.6), dpi=300)
-    gs = plt.GridSpec(5,20)
+    sns.set_context('paper')
+    fig = plt.figure(figsize=(4.6,3.5), dpi=400)
+    gs = plt.GridSpec(5,10)
 
-    ax = fig.add_subplot(gs[:,:17])
+    axes = [fig.add_subplot(gs[1:,:5]), fig.add_subplot(gs[1:,5:])]
+    labels = list(P.index)
     n = len(labels)
+    ax_color = fig.add_subplot(gs[0,1:-1])
 
-    cnorm = extended_hinton(ax, P, P, matrix_style=True, cmap=cmap,
-                            vmax=vmax if vmax is not None else P.max(),
-                            cmin=0, cmax=P.max(),enforce_box=True)
-    ax.set_xticks(range(n))
-    ax.set_yticks(range(n))
-    ax.set_xticklabels(labels, rotation=90)
-    ax.set_yticklabels(labels)
-#     ax.set_title(r'full connection probability matrix', fontweight='bold')
-    ax.set_xlim((-1,n))
-    ax.set_ylim((-1,n))
-    ax.set_ylabel('postsynaptic')
-    ax.set_xlabel('presynaptic')
-    ax_color = fig.add_subplot(gs[1:4,18:])
-    cbar = ColorbarBase(ax_color, cmap=cmap, norm=cnorm)
+    for p, ax in zip([P,Q], axes):
+        p = p.as_matrix()
+        print(p.max())
+        cnorm, cmapable = extended_hinton(ax, p, p, matrix_style=True, cmap=cmap,
+                                vmax=vmax if vmax is not None else p.max(),
+                                cmin=cmin, cmax=cmax,enforce_box=True)
+        ax.set_xticks(range(n))
+        ax.set_yticks(range(n))
+        ax.set_xticklabels(labels, rotation=90)
+        ax.set_xlim((-1,n))
+        ax.set_ylim((-1,n))
+        ax.set_xlabel('presynaptic')
+
+    cbar = ColorbarBase(ax_color, cmap=cmap, norm=cnorm, orientation='horizontal', label='connection probability')
+
+
+    axes[0].set_ylabel('postsynaptic')
+    axes[0].set_yticklabels(labels)
+    axes[1].set_yticklabels([])
+    for ax in axes:
+        ax.invert_yaxis()
+        ax.tick_params(axis='both', which='major', labelsize=6)
+        ax.grid(which='major', axis='both', linewidth=.3)
+        for _, i in ax.spines.items():
+            i.set_linewidth(0.3)
+    ax_color.tick_params(axis='both', which='major', labelsize=6)
+    for _, i in ax_color.spines.items():
+        i.set_linewidth(0)
+
+
     fig.tight_layout()
-    ax.invert_yaxis()
 
-    return fig, {'matrix':ax, 'color':ax_color}
+    return fig, {'matrix':axes, 'color':ax_color}
 
 def layer(name):
     if 'L1' in name:
