@@ -301,7 +301,7 @@ class OverlapGroup(dj.Computed):
         exit()
         # ----------------------------------
 
-    def plot_schematic(self, fro='L5 NGC', to='L23 BTC'):
+    def plot_schematic(self, fro='L5 Pyr', to='L23 BTC'):
 
         AXON = (CellRegion() & dict(cell_region_name='axon')).fetch1['cell_region_id']
         DENDRITE = (CellRegion() & dict(cell_region_name='dendrite')).fetch1['cell_region_id']
@@ -324,7 +324,23 @@ class OverlapGroup(dj.Computed):
 
         fig = plt.figure()
         ax = fig.add_subplot(1,1,1, projection='3d')
-        plot_skeleton(ax, X['from'][0], skeleton['from'][0], region['from'][0])
+        plot_skeleton(ax, X['from'][0], skeleton['from'][0], region['from'][0] == AXON,
+                      hull_kw=dict(alpha=.1, color=sns.xkcd_rgb['cerulean'], lw=.1),
+                      mask_kw=dict(ms=3, color=sns.xkcd_rgb['cerulean'], label=fro + ' axon'),
+                      other_kw=dict(ms=3, color=sns.xkcd_rgb['goldenrod'], label=fro + ' dendrite'),
+                      )
+        plot_skeleton(ax, X['to'][0] + delta, skeleton['to'][0], region['to'][0] == DENDRITE,
+                      hull_kw=dict(alpha=.1, color=sns.xkcd_rgb['orange red'], lw=.1),
+                      mask_kw=dict(ms=3, color=sns.xkcd_rgb['orange red'], label=to + ' dendrite'),
+                      other_kw=dict(ms=3, color='slategray', label=to + ' axon'),
+                      )
+
+        X,Z = np.meshgrid(np.linspace(-600,600,3), np.linspace(-600,600,3))
+        ax.plot_surface(X, 0*X+50, Z, rstride=1, cstride=1, color='lightgrey', alpha=.2, lw=.1)
+        lgnd = ax.legend()
+        for h in lgnd.legendHandles:
+            h._legmarker.set_markersize(15)
+
         #----------------------------------
         # TODO: Remove this later
         from IPython import embed
