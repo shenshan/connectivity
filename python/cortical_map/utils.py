@@ -7,6 +7,9 @@ from matplotlib.colorbar import ColorbarBase
 from matplotlib.cm import ScalarMappable
 from matplotlib.pyplot import fill, cm, Rectangle
 import os
+from scipy.spatial import ConvexHull, Delaunay
+from matplotlib.tri import Triangulation
+
 
 def rasterize(node_coords, connected_pairs, region, resolution=1):
     """
@@ -31,6 +34,45 @@ def rasterize(node_coords, connected_pairs, region, resolution=1):
                 X.append(node + delta * v)
                 reg.append(region[fro])
     return np.vstack((X, node_coords)), np.hstack((reg, region))
+
+
+def plot_skeleton(ax, node_coords, skeleton, region):
+    # for fro, to in skeleton:
+    #     node = node_coords[fro]
+    #     conn = node_coords[to]
+    #     ax.plot(*zip(node,conn), linestyle='-', color='k')
+    ax.plot(node_coords[:, 0], node_coords[:, 1], node_coords[:, 2], '.k', ms=2)
+
+    node_coords = spin_shuffle(node_coords, copy=5)
+
+    z = node_coords[:, 2]
+    idx = np.digitize(z, bins=np.linspace(z.min(), z.max(), 30))
+
+    Y = []
+    m = 40
+
+    w = np.linspace(0, 2 * np.pi, m)
+    c, s = np.cos(w), np.sin(w)
+
+
+    x,y,z = [],[],[]
+    for i in np.unique(idx):
+        X = node_coords[idx == i]
+        R = np.sqrt(np.sum(X[:, :2] ** 2, axis=1))
+        r_max = R.max()
+        x.append(r_max * c)
+        y.append(r_max * s)
+        z.append(np.ones_like(c) * X[:, 2].mean())
+        # if i % 2:
+        #     Y.append(np.c_[r_max * c, r_max * s, np.ones_like(c) * X[:, 2].mean()])
+        # else:
+        #     Y.append(np.c_[r_max * c2, r_max * s2, np.ones_like(c) * X[:, 2].mean()])
+    x = np.vstack(x)
+    y = np.vstack(y)
+    z = np.vstack(z)
+
+    ax.plot_surface(x,y,z, rstride=1, cstride=1, color='grey', alpha=.3)
+
 
 
 def spin_shuffle(X, copy=1):
@@ -58,8 +100,7 @@ def spin(X, theta):
 
 
 def plot_cells(X, Y, delta, param1, param2, threed=False):
-
-    Y = Y+delta
+    Y = Y + delta
     sns.set_style('whitegrid')
     fig = plt.figure(figsize=(12, 12), dpi=400)
 
@@ -81,6 +122,7 @@ def plot_cells(X, Y, delta, param1, param2, threed=False):
         h._legmarker.set_markersize(15)
 
     return fig, ax
+
 
 def compute_overlap_density(X, Y, bin_width, delta):
     """
@@ -104,6 +146,7 @@ def compute_overlap_density(X, Y, bin_width, delta):
     H2 /= bin_width ** 3
     return H1 * H2, E
 
+
 def extended_hinton(ax, V, C, vmax=None, cmin=None, cmax=None, cmap=None, matrix_style=False, alpha=1,
                     enforce_box=False):
     if cmap is None:
@@ -122,7 +165,6 @@ def extended_hinton(ax, V, C, vmax=None, cmin=None, cmax=None, cmap=None, matrix
     ax.patch.set_facecolor([0, 0, 0, 0])
 
     for (x, y), w in np.ndenumerate(V):
-
         s = C[x, y]
         color = cmap(cnorm(s))  # cmap(s / cmax)
         size = np.abs(w / vmax)
@@ -136,9 +178,10 @@ def extended_hinton(ax, V, C, vmax=None, cmin=None, cmax=None, cmap=None, matrix
             ax.set_aspect('equal', 'box')
         except:
             pass
-    #ax.autoscale_view()
-    #ax.invert_yaxis()
+    # ax.autoscale_view()
+    # ax.invert_yaxis()
     return cnorm, cmapable
+
 
 def plot_connections(P, Q, vmax=None, cmin=None, cmax=None):
     # colors = ["black", "azure","apple","golden yellow",   "neon pink"]
@@ -147,29 +190,28 @@ def plot_connections(P, Q, vmax=None, cmin=None, cmax=None):
 
     sns.set_style('whitegrid')
     sns.set_context('paper')
-    fig = plt.figure(figsize=(4.6,3.5), dpi=400)
-    gs = plt.GridSpec(5,10)
+    fig = plt.figure(figsize=(4.6, 3.5), dpi=400)
+    gs = plt.GridSpec(5, 10)
 
-    axes = [fig.add_subplot(gs[1:,:5]), fig.add_subplot(gs[1:,5:])]
+    axes = [fig.add_subplot(gs[1:, :5]), fig.add_subplot(gs[1:, 5:])]
     labels = list(P.index)
     n = len(labels)
-    ax_color = fig.add_subplot(gs[0,1:-1])
+    ax_color = fig.add_subplot(gs[0, 1:-1])
 
-    for p, ax in zip([P,Q], axes):
+    for p, ax in zip([P, Q], axes):
         p = p.as_matrix()
         print(p.max())
         cnorm, cmapable = extended_hinton(ax, p, p, matrix_style=True, cmap=cmap,
-                                vmax=vmax if vmax is not None else p.max(),
-                                cmin=cmin, cmax=cmax,enforce_box=True)
+                                          vmax=vmax if vmax is not None else p.max(),
+                                          cmin=cmin, cmax=cmax, enforce_box=True)
         ax.set_xticks(range(n))
         ax.set_yticks(range(n))
         ax.set_xticklabels(labels, rotation=90)
-        ax.set_xlim((-1,n))
-        ax.set_ylim((-1,n))
+        ax.set_xlim((-1, n))
+        ax.set_ylim((-1, n))
         ax.set_xlabel('presynaptic')
 
     cbar = ColorbarBase(ax_color, cmap=cmap, norm=cnorm, orientation='horizontal', label='connection probability')
-
 
     axes[0].set_ylabel('postsynaptic')
     axes[0].set_yticklabels(labels)
@@ -184,10 +226,10 @@ def plot_connections(P, Q, vmax=None, cmin=None, cmax=None):
     for _, i in ax_color.spines.items():
         i.set_linewidth(0)
 
-
     fig.tight_layout()
 
-    return fig, {'matrix':axes, 'color':ax_color}
+    return fig, {'matrix': axes, 'color': ax_color}
+
 
 def layer(name):
     if 'L1' in name:
@@ -244,4 +286,3 @@ def load_data(transpose=False, collapse=None, remove=None):
         return labels, layers, K.T, N.T
     else:
         return labels, layers, K, N
-

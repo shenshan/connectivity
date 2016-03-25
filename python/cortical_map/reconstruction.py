@@ -1,12 +1,14 @@
 import datajoint as dj
 import numpy as np
 import matplotlib.pyplot as plt
-from cortical_map.utils import rasterize, plot_cells, spin_shuffle, compute_overlap_density
+from cortical_map.utils import rasterize, plot_cells, spin_shuffle, compute_overlap_density, plot_skeleton
 from . import connectivity as conn
 from itertools import product
 import seaborn as sns
 import pandas as pd
 from .utils import extended_hinton, plot_connections, load_data
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib
 
 schema = dj.schema('shan_reconstruction', locals())
 
@@ -212,7 +214,7 @@ class OverlapGroup(dj.Computed):
             part.insert1(key)
 
     @staticmethod
-    def load_cells(trees, resolution=.5, correct_cut=False):
+    def load_cells(trees, resolution=.5, correct_cut=False, stack=True):
         """
         Loads cells from the database
         :param cell_type: string containing layer and cell type morphology
@@ -228,7 +230,7 @@ class OverlapGroup(dj.Computed):
                 zip(*trees.fetch[dj.key, 'node_coords', 'connected_pairs', 'node_region']):
             node_coords = bugfix_reshape(node_coords)
             node_coords[:, [1, 2]] = node_coords[:,
-                                     [2, 1]]  # TODO: check with Shan and Xiaolong whether cells got rotated again
+                                     [2, 1]]
 
             connected_pairs = bugfix_reshape(connected_pairs.astype(int)) - 1  # matlab to python index shift
             region = region.squeeze()
@@ -238,7 +240,11 @@ class OverlapGroup(dj.Computed):
             mu = np.mean(node_coords[region == CELLBODY, :], axis=0)
             node_coords -= mu
 
-            X, region = rasterize(node_coords, connected_pairs, region, resolution)
+            if resolution is not None:
+                X, region = rasterize(node_coords, connected_pairs, region, resolution)
+            else:
+                X = node_coords
+
             if correct_cut:
                 ymax = X[:, 1].max()
                 idx = X[:, 1] <= -ymax
@@ -249,7 +255,10 @@ class OverlapGroup(dj.Computed):
 
             cells.append(X)
             regions.append(region)
-        return np.vstack(cells), np.hstack(regions)
+        if stack:
+            return np.vstack(cells), np.hstack(regions)
+        else:
+            return cells, regions, connected_pairs
 
     def plot_correction(self, density_param_id=1, cut_distance=15):
         # bin_width = (DensityParameters() & dict(density_param_id=density_param_id)).fetch1['bin_width']
@@ -291,3 +300,36 @@ class OverlapGroup(dj.Computed):
         embed()
         exit()
         # ----------------------------------
+
+    def plot_schematic(self, fro='L5 NGC', to='L23 BTC'):
+
+        AXON = (CellRegion() & dict(cell_region_name='axon')).fetch1['cell_region_id']
+        DENDRITE = (CellRegion() & dict(cell_region_name='dendrite')).fetch1['cell_region_id']
+
+        # load all cells from the particular pair of cell types
+        X, region, cells, skeleton = {}, {}, {}, {}
+        for role, tp in zip(('from', 'to'),(fro, to)):
+            layer, morph = (CellType() & dict(cell_type_name=tp)).fetch1['layer', 'cell_type_morph']
+
+            cells[role] = (conn.ConnectMembership() * conn.Cell()
+                           & dict(role=role, cell_layer=layer, cell_type_morph=morph)
+                           ).project(**{('cell_id_' + role): 'cell_id'})
+            X[role], region[role], skeleton[role] = OverlapGroup.load_cells(Tree() * CellType()
+                                                            & dict(layer=layer, cell_type_morph=morph),
+                                                            resolution=None, correct_cut=False, stack=False)
+        keys, delta_x, delta_y = (conn.Distance() * cells['from'] * cells['to']).fetch[dj.key, 'delta_x', 'delta_y']
+        offsets = np.c_[delta_x, np.zeros_like(delta_x), delta_y]
+
+        delta = offsets[0]
+
+        fig = plt.figure()
+        ax = fig.add_subplot(1,1,1, projection='3d')
+        plot_skeleton(ax, X['from'][0], skeleton['from'][0], region['from'][0])
+        #----------------------------------
+        # TODO: Remove this later
+        from IPython import embed
+        embed()
+        # exit()
+        #----------------------------------
+
+
