@@ -9,6 +9,7 @@ import pandas as pd
 from .utils import extended_hinton, plot_connections, load_data
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 schema = dj.schema('shan_reconstruction', locals())
 
@@ -302,12 +303,12 @@ class OverlapGroup(dj.Computed):
         # ----------------------------------
 
     def plot_schematic(self, fro='L23 MaC', to='L23 BC'):
-        cm = plt.cm.get_cmap('viridis')
+        cm = plt.cm.get_cmap('bwr')
         cm._init()
-        cm._lut[:-3, -1] = np.abs(np.linspace(0, 0.8, cm.N))
+        cm._lut[:-3, -1] = np.abs(np.linspace(0, 1.0, cm.N))
 
-        axon_color=sns.xkcd_rgb['neon pink']
-        dendrite_color=sns.xkcd_rgb['bright lavender']
+        axon_color=sns.xkcd_rgb['azure']
+        dendrite_color=sns.xkcd_rgb['purple pink']
         AXON = (CellRegion() & dict(cell_region_name='axon')).fetch1['cell_region_id']
         DENDRITE = (CellRegion() & dict(cell_region_name='dendrite')).fetch1['cell_region_id']
 
@@ -332,16 +333,16 @@ class OverlapGroup(dj.Computed):
 
         delta = 3*offsets[0]
 
-        fig = plt.figure()
-        ax = fig.add_subplot(1, 1, 1, projection='3d')
+        fig = plt.figure(facecolor='w', dpi=400)
+        ax = fig.add_subplot(1, 1, 1, projection='3d', axisbg='w')
         x_fro, x_to = X['from'][0], X['to'][0]
         plot_skeleton(ax, x_fro, skeleton['from'][0], region['from'][0] == AXON,
-                      mask_kw=dict(lw=1, ms=2, color=axon_color, label=fro + ' axon'),
-                      other_kw=dict(lw=.5, ms=1, color='grey', label=fro + ' dendrite'), fast=False, stride=4
+                      mask_kw=dict(lw=.8, ms=2, color=axon_color, label=fro + ' axon'),
+                      other_kw=dict(lw=.1, ms=1, color='grey', label=fro + ' dendrite'), fast=False, stride=1
                       )
         plot_skeleton(ax, x_to + delta, skeleton['to'][0], region['to'][0] == DENDRITE,
-                      mask_kw=dict(lw=1, ms=2, color=dendrite_color, label=to + ' dendrite'),
-                      other_kw=dict(lw=.5, ms=1, color='grey', label=to + ' axon'), fast=False, stride=4
+                      mask_kw=dict(lw=.8, ms=2, color=dendrite_color, label=to + ' dendrite'),
+                      other_kw=dict(lw=.1, ms=1, color='grey', label=to + ' axon'), fast=False, stride=1
                       )
 
         x_fro = spin_shuffle(x_fro, 10)
@@ -351,26 +352,45 @@ class OverlapGroup(dj.Computed):
         x_min, y_min, z_min = tmp.min(axis=0)
         x_max, y_max, z_max = tmp.max(axis=0)
         db = 10
-        bins = (np.arange(x_min, x_max + db, db), np.arange(y_min, y_max + db, db), np.arange(z_min, z_max + db, db))
+        bins = (np.arange(x_min, x_max + db, db),
+                np.arange(y_min, y_max + db, db),
+                np.arange(z_min, z_max + db, db))
 
-        H_from, _, _ = np.histogram2d(x_fro[:, 0], x_fro[:, 1], bins=bins)
-        H_to, _, _ = np.histogram2d(x_to[:, 0], x_to[:, 1], bins=bins)
+        H_from, _  = np.histogramdd(x_fro, bins=bins)
+        H_to, __ = np.histogramdd(x_to, bins=bins)
         H_to /= db ** 3
         H_from /= db ** 3
-        x, y = np.meshgrid(*map(lambda x: 0.5 * (x[1:] + x[:-1]), bins))
+        x, y = np.meshgrid(*map(lambda x: 0.5 * (x[1:] + x[:-1]), bins[:2]))
 
-        f = (H_from*H_to).sum(axis=0)
+
+        f = (H_from*H_to).sum(axis=(0,2))
         t = bins[1]
         t = 0.5*(t[1:]+t[:-1])
         f = f/f.max()*200
-        ax.plot(0*t, t, f+z_max, color='k', lw=2)
+        f += z_max
+        ax.plot(0*t, t, f, color='k', lw=1)
+        idx = (t >= -15) & (t <= 300 -15)
+        t, f = t[idx], f[idx]
+        v = []
+        for k in range(0, len(t) - 1):
+            v.append(list(zip( 
+                np.zeros(4),
+                [t[k], t[k+1], t[k+1], t[k]],
+                [f[k], f[k+1],   z_max, z_max])))
+        
+        poly3dCollection = Poly3DCollection(v, linewidths=0, facecolors=['slategray'])
+
+        ax.add_collection3d(poly3dCollection)
+
+        H_from = H_from.sum(axis=2)
+        H_to = H_to.sum(axis=2)
 
         H = np.log(1e-2 + H_from * H_to)
         #H[H <= np.percentile(H.ravel(), 1)] = np.nan
         cset = ax.contourf(x.T, y.T, H , 10, zdir='z', offset=z_max, cmap=cm)
         matplotlib.rcParams['contour.negative_linestyle'] = 'solid'
-        cset = ax.contour(x.T, y.T, np.log(1e-1 + H_from), 5, zdir='z', offset=z_min, colors=axon_color)
-        cset = ax.contour(x.T, y.T, np.log(1e-1 + H_to), 5, zdir='z', offset=z_min, colors=dendrite_color)
+        cset = ax.contour(x.T, y.T, np.log(1e-1 + H_from), 5, zdir='z', offset=z_min, colors=axon_color,linewidths=.8,alpha=.5)
+        cset = ax.contour(x.T, y.T, np.log(1e-1 + H_to), 5, zdir='z', offset=z_min+1, colors=dendrite_color, linewidths=.8, alpha=.5)
 
         x,z = np.meshgrid(np.linspace(x_min, x_max, 3), np.linspace(z_min, z_max, 3))
         ax.plot_surface(x,0*x-15, z, color='silver', alpha=.1)
@@ -380,9 +400,12 @@ class OverlapGroup(dj.Computed):
         ax.plot_surface(0*y+x_min,y, z, color='silver', alpha=.1)
         ax.set_zlim((z_min, z_max))
         ax.set_aspect(1)
-        ax.view_init(elev=29, azim=-59)
+        ax.view_init(elev=29, azim=-43)
         ax.axis('equal')
         ax.axis('off')
+
+        for form in ['png','pdf']:
+            fig.savefig('schematic_from_{0}_to_{1}.{2}'.format(fro, to, form))
         # ----------------------------------
         # TODO: Remove this later
         from IPython import embed
