@@ -137,6 +137,7 @@ class OverlapGroup(dj.Computed):
         """
 
     def _make_tuples(self, key):
+        print('Populating', key)
         # get identifiers for different regions
         AXON = (CellRegion() & dict(cell_region_name='axon')).fetch1['cell_region_id']
         DENDRITE = (CellRegion() & dict(cell_region_name='dendrite')).fetch1['cell_region_id']
@@ -203,7 +204,6 @@ class OverlapGroup(dj.Computed):
             # compute bin centers along y-axis and only get positive side
             y = 0.5 * (E[1][1:] + E[1][:-1])
             idx = y > 0
-
             # marginalize density
             p = H[:, idx, :].sum(axis=(0, 2))
             key.update({f: k[f] for f in k.dtype.fields})
