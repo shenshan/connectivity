@@ -116,7 +116,7 @@ def plot_cells(X, Y, delta, param1, param2, threed=False):
     return fig, ax
 
 
-def compute_overlap_density(X, Y, bin_width, delta):
+def compute_overlap_density(X, Y, bin_width, delta, n):
     """
     Computes the overlap density between X and Y shifted by dist along the x axis.
 
@@ -134,8 +134,8 @@ def compute_overlap_density(X, Y, bin_width, delta):
 
     H1, _ = np.histogramdd(X, bins)
     H2, E = np.histogramdd(Y, bins)
-    H1 /= bin_width ** 3
-    H2 /= bin_width ** 3
+    H1 /= bin_width ** 3 * n[0]
+    H2 /= bin_width ** 3 * n[1]
     return H1 * H2, E
 
 

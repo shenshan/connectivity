@@ -147,7 +147,7 @@ class OverlapGroup(dj.Computed):
                                                'cell_offset', 'multiplication_factor', 'cut_compensation']
 
         # load all cells from the particular pair of cell types
-        X, region, cells = {}, {}, {}
+        X, region, cells, N = {}, {}, {}, {}
         for role in ('from', 'to'):
             layer, morph = (CellType() & dict(cell_type_name=key['cell_type_' + role])).fetch1[
                 'layer', 'cell_type_morph']
@@ -155,7 +155,7 @@ class OverlapGroup(dj.Computed):
             cells[role] = (conn.ConnectMembership() * conn.Cell()
                            & dict(role=role, cell_layer=layer, cell_type_morph=morph)
                            ).project(**{('cell_id_' + role): 'cell_id'})
-            X[role], region[role], _ = load_cells(Tree() * CellType() & dict(layer=layer, cell_type_morph=morph),
+            X[role], region[role], _, N[role] = load_cells(Tree() * CellType() & dict(layer=layer, cell_type_morph=morph),
                                                   resolution=raster_resolution,
                                                   correct_cut=cut_compensation)
 
@@ -168,22 +168,22 @@ class OverlapGroup(dj.Computed):
         offsets = np.c_[delta_x, -cell_offset * np.ones_like(delta_x), delta_y]
 
         # save control figures
-        if len(delta_x) > 1:
-            sns.set(style="ticks")
-            sns.jointplot(delta_x, delta_y, kind="scatter")
-            plt.gca().set_xlabel(r'$\Delta$ lateral')
-            plt.gca().set_ylabel(r'$\Delta$ depth')
-            plt.gcf().suptitle('{cell_type_from} to {cell_type_to}'.format(**key))
-            plt.gcf().tight_layout()
-            plt.gcf().savefig('{cell_type_from}_to_{cell_type_to}_deltahist.png'.format(**key))
-
-            plt.close(plt.gcf())
-
-        fig, ax = plot_cells(X['from'], X['to'], offsets[0],
-                             dict(color=sns.xkcd_rgb['neon pink'], label=key['cell_type_from']),
-                             dict(color=sns.xkcd_rgb['neon blue'], label=key['cell_type_to']))
-        fig.savefig('{cell_type_from}_to_{cell_type_to}.png'.format(**key))
-        plt.close(fig)
+        # if len(delta_x) > 1:
+        #     sns.set(style="ticks")
+        #     sns.jointplot(delta_x, delta_y, kind="scatter")
+        #     plt.gca().set_xlabel(r'$\Delta$ lateral')
+        #     plt.gca().set_ylabel(r'$\Delta$ depth')
+        #     plt.gcf().suptitle('{cell_type_from} to {cell_type_to}'.format(**key))
+        #     plt.gcf().tight_layout()
+        #     plt.gcf().savefig('{cell_type_from}_to_{cell_type_to}_deltahist.png'.format(**key))
+        #
+        #     plt.close(plt.gcf())
+        #
+        # fig, ax = plot_cells(X['from'], X['to'], offsets[0],
+        #                      dict(color=sns.xkcd_rgb['neon pink'], label=key['cell_type_from']),
+        #                      dict(color=sns.xkcd_rgb['neon blue'], label=key['cell_type_to']))
+        # fig.savefig('{cell_type_from}_to_{cell_type_to}.png'.format(**key))
+        # plt.close(fig)
 
         # shuffle by rotation around z-axis and increase data volume
         X['from'] = spin_shuffle(X['from'], copy=multiplication_factor)
@@ -198,7 +198,7 @@ class OverlapGroup(dj.Computed):
         # insert an element in part (sub) table for each distance between cells of that type
         for k, delta in zip(keys, offsets):
             H, E = compute_overlap_density(X['from'][region['from'] == AXON], X['to'][region['to'] == DENDRITE],
-                                           bin_width, delta)
+                                           bin_width, delta, n=(N['from'], N['to']))
 
             # compute bin centers along y-axis and only get positive side
             y = 0.5 * (E[1][1:] + E[1][:-1])
@@ -228,11 +228,14 @@ class OverlapGroup(dj.Computed):
 
         gr = df_correction.groupby(['post', 'pre'])
 
-        D0 = gr.agg({'p': lambda x: np.mean(x, axis=0).sum() * 2})
+        def q(X):
+            return np.mean([x[1:].sum()/2/x.sum() for x in X])
 
-        D = gr.agg({'p': lambda x: np.mean(x, axis=0)[1:].sum()})  # TODO: replace 1: at some point
-        Q = 1 - D / D0
+        # D0 = gr.agg({'p': lambda x: np.mean(x, axis=0).sum() * 2})
+        # D = gr.agg({'p': lambda x: np.mean(x, axis=0)[1:].sum()})  # TODO: replace 1: at some point
+        # Q = 1 - D / D0
 
+        Q = 1 - gr.agg({'p':q})
         labels = ['L1 SBC-like', 'L1 eNGC', 'L23 MC', 'L23 NGC', 'L23 BTC', 'L23 BPC', 'L23 DBC', 'L23 BC', 'L23 ChC',
                   'L23 Pyr', 'L5 MC', 'L5 NGC', 'L5 BC', 'L5 SC', 'L5 HEC', 'L5 DC', 'L5 Pyr']
 
@@ -406,6 +409,6 @@ def load_cells(trees, resolution=.5, correct_cut=False, stack=True):
         regions.append(region)
         pairs.append(connected_pairs)
     if stack:
-        return np.vstack(cells), np.hstack(regions), np.vstack(pairs)
+        return np.vstack(cells), np.hstack(regions), np.vstack(pairs), len(cells)
     else:
-        return cells, regions, pairs
+        return cells, regions, pairs, len(cells)
