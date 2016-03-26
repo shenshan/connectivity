@@ -36,41 +36,23 @@ def rasterize(node_coords, connected_pairs, region, resolution=1):
     return np.vstack((X, node_coords)), np.hstack((reg, region))
 
 
-def plot_skeleton(ax, node_coords, skeleton, mask, hull_kw, mask_kw, other_kw):
-    # for fro, to in skeleton:
-    #     node = node_coords[fro]
-    #     conn = node_coords[to]
-    #     ax.plot(*zip(node,conn), linestyle='-', color='k')
-    mu = node_coords.mean(axis=0)
-    print(mask.shape, node_coords.shape)
-    hull_part = spin_shuffle(node_coords[mask] - mu, copy=5)
+def plot_skeleton(ax, node_coords, skeleton, mask, mask_kw, other_kw, fast=True):
 
-    z = hull_part[:, 2]
-    idx = np.digitize(z, bins=np.linspace(z.min(), z.max(), 40))
+    if not fast:
+        n = len(skeleton)
+        for i, (fro, to) in enumerate(skeleton[::2]):
+            if i % 100 == 0:
+                print(i, '/', n)
+            node = node_coords[fro]
+            conn = node_coords[to]
+            if mask[fro] and mask[to]:
+                ax.plot(*zip(node, conn), linestyle='-', **mask_kw)
+            else:
+                ax.plot(*zip(node, conn), linestyle='-', **other_kw)
 
-    Y = []
-    m = 40
-
-    w = np.linspace(0, 2 * np.pi, m)
-    c, s = np.cos(w), np.sin(w)
-
-    x, y, z = [], [], []
-    for i in np.unique(idx):
-        X = hull_part[idx == i]
-        R = np.sqrt(np.sum(X[:, :2] ** 2, axis=1))
-        r_max = R.max()
-        x.append(r_max * c)
-        y.append(r_max * s)
-        z.append(np.ones_like(c) * X[:, 2].mean())
-    x = np.vstack(x) + mu[0]
-    y = np.vstack(y) + mu[1]
-    z = np.vstack(z) + mu[2]
-
-    ax.plot(node_coords[mask, 0], node_coords[mask, 1], node_coords[mask, 2], '.', **mask_kw)
-    ax.plot(node_coords[~mask, 0], node_coords[~mask, 1], node_coords[~mask, 2], '.', **other_kw)
-
-
-    ax.plot_surface(x, y, z, rstride=1, cstride=1, **hull_kw)
+    else:
+        ax.plot(node_coords[mask, 0], node_coords[mask, 1], node_coords[mask, 2], '.', **mask_kw)
+        ax.plot(node_coords[~mask, 0], node_coords[~mask, 1], node_coords[~mask, 2], '.', **other_kw)
 
 
 def spin_shuffle(X, copy=1):

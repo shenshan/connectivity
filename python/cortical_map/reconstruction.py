@@ -223,7 +223,7 @@ class OverlapGroup(dj.Computed):
         """
         cells = []
         regions = []
-
+        pairs = []
         CELLBODY = (CellRegion() & dict(cell_region_name='cellbody')).fetch1['cell_region_id']
 
         for k, node_coords, connected_pairs, region in \
@@ -255,10 +255,11 @@ class OverlapGroup(dj.Computed):
 
             cells.append(X)
             regions.append(region)
+            pairs.append(connected_pairs)
         if stack:
             return np.vstack(cells), np.hstack(regions)
         else:
-            return cells, regions, connected_pairs
+            return cells, regions, pairs
 
     def plot_correction(self, density_param_id=1, cut_distance=15):
         # bin_width = (DensityParameters() & dict(density_param_id=density_param_id)).fetch1['bin_width']
@@ -284,12 +285,11 @@ class OverlapGroup(dj.Computed):
         labels = ['L1 SBC-like', 'L1 eNGC', 'L23 MC', 'L23 NGC', 'L23 BTC', 'L23 BPC', 'L23 DBC', 'L23 BC', 'L23 ChC',
                   'L23 Pyr', 'L5 MC', 'L5 NGC', 'L5 BC', 'L5 SC', 'L5 HEC', 'L5 DC', 'L5 Pyr']
 
-
         P2 = (P / Q).fillna(0)
-        P = P.unstack().loc[labels][list(product(['p'],labels))]
-        P2 = P2.unstack().loc[labels][list(product(['p'],labels))]
+        P = P.unstack().loc[labels][list(product(['p'], labels))]
+        P2 = P2.unstack().loc[labels][list(product(['p'], labels))]
 
-        fig, axes = plot_connections(P,P2, vmax=1, cmin=0, cmax=1)
+        fig, axes = plot_connections(P, P2, vmax=1, cmin=0, cmax=1)
         axes['matrix'][0].set_title('uncorrected')
         axes['matrix'][1].set_title('corrected')
         fig.tight_layout()
@@ -301,51 +301,71 @@ class OverlapGroup(dj.Computed):
         exit()
         # ----------------------------------
 
-    def plot_schematic(self, fro='L5 Pyr', to='L23 BTC'):
+    def plot_schematic(self, fro='L5 MaC', to='L23 DBC'):
+        cm = plt.cm.get_cmap('viridis')
+        cm._lut[:-3, -1] = np.abs(np.linspace(0, 1.0, cm.N))
 
         AXON = (CellRegion() & dict(cell_region_name='axon')).fetch1['cell_region_id']
         DENDRITE = (CellRegion() & dict(cell_region_name='dendrite')).fetch1['cell_region_id']
 
         # load all cells from the particular pair of cell types
         X, region, cells, skeleton = {}, {}, {}, {}
-        for role, tp in zip(('from', 'to'),(fro, to)):
+        for role, tp in zip(('from', 'to'), (fro, to)):
             layer, morph = (CellType() & dict(cell_type_name=tp)).fetch1['layer', 'cell_type_morph']
 
             cells[role] = (conn.ConnectMembership() * conn.Cell()
                            & dict(role=role, cell_layer=layer, cell_type_morph=morph)
                            ).project(**{('cell_id_' + role): 'cell_id'})
             X[role], region[role], skeleton[role] = OverlapGroup.load_cells(Tree() * CellType()
-                                                            & dict(layer=layer, cell_type_morph=morph),
-                                                            resolution=None, correct_cut=False, stack=False)
+                                                                            & dict(layer=layer, cell_type_morph=morph),
+                                                                            resolution=None, correct_cut=False,
+                                                                            stack=False)
+            for i in range(len(X[role])):
+
+                X[role][i][:, 1] *= -1
+
         keys, delta_x, delta_y = (conn.Distance() * cells['from'] * cells['to']).fetch[dj.key, 'delta_x', 'delta_y']
         offsets = np.c_[delta_x, np.zeros_like(delta_x), delta_y]
 
-        delta = offsets[0]
+        delta = 3*offsets[0]
 
         fig = plt.figure()
-        ax = fig.add_subplot(1,1,1, projection='3d')
-        plot_skeleton(ax, X['from'][0], skeleton['from'][0], region['from'][0] == AXON,
-                      hull_kw=dict(alpha=.1, color=sns.xkcd_rgb['cerulean'], lw=.1),
-                      mask_kw=dict(ms=3, color=sns.xkcd_rgb['cerulean'], label=fro + ' axon'),
-                      other_kw=dict(ms=3, color=sns.xkcd_rgb['goldenrod'], label=fro + ' dendrite'),
+        ax = fig.add_subplot(1, 1, 1, projection='3d')
+        x_fro, x_to = X['from'][0], X['to'][0]
+        plot_skeleton(ax, x_fro, skeleton['from'][0], region['from'][0] == AXON,
+                      mask_kw=dict(lw=1, ms=2, color=sns.xkcd_rgb['azure'], label=fro + ' axon'),
+                      other_kw=dict(lw=.5, ms=1, color=sns.xkcd_rgb['grey'], label=fro + ' dendrite'), fast=False
                       )
-        plot_skeleton(ax, X['to'][0] + delta, skeleton['to'][0], region['to'][0] == DENDRITE,
-                      hull_kw=dict(alpha=.1, color=sns.xkcd_rgb['orange red'], lw=.1),
-                      mask_kw=dict(ms=3, color=sns.xkcd_rgb['orange red'], label=to + ' dendrite'),
-                      other_kw=dict(ms=3, color='slategray', label=to + ' axon'),
+        plot_skeleton(ax, x_to + delta, skeleton['to'][0], region['to'][0] == DENDRITE,
+                      mask_kw=dict(lw=1, ms=2, color=sns.xkcd_rgb['orange red'], label=to + ' dendrite'),
+                      other_kw=dict(lw=.5, ms=1, color='darkgrey', label=to + ' axon'), fast=False
                       )
 
-        X,Z = np.meshgrid(np.linspace(-600,600,3), np.linspace(-600,600,3))
-        ax.plot_surface(X, 0*X+50, Z, rstride=1, cstride=1, color='lightgrey', alpha=.2, lw=.1)
-        lgnd = ax.legend()
-        for h in lgnd.legendHandles:
-            h._legmarker.set_markersize(15)
+        x_fro = spin_shuffle(x_fro, 10)
+        x_to = spin_shuffle(x_to, 10) + delta
 
-        #----------------------------------
+        tmp = np.vstack((x_fro, x_to))
+        x_min, y_min, z_min = tmp.min(axis=0)
+        x_max, y_max, z_max = tmp.max(axis=0)
+        db = 10
+        bins = (np.arange(x_min, x_max + db, db), np.arange(y_min, y_max + db, db))
+
+        H_from, _, _ = np.histogram2d(x_fro[:, 0], x_fro[:, 1], bins=bins)
+        H_to, _, _ = np.histogram2d(x_to[:, 0], x_to[:, 1], bins=bins)
+        H_to /= db ** 3
+        H_from /= db ** 3
+        x, y = np.meshgrid(*map(lambda x: 0.5 * (x[1:] + x[:-1]), bins))
+
+        cset = ax.contourf(x.T, y.T, np.log(1e-4 + H_from * H_to), 20, zdir='z', offset=z_min, cmap=cm)
+
+        x,z = np.meshgrid(np.linspace(x_min, x_max, 3), np.linspace(z_min, z_max, 3))
+        ax.plot_surface(x,0*x-15, z, color='silver', alpha=.2)
+        ax.plot_surface(x,0*x-15+300, z, color='silver', alpha=.2)
+        ax.set_zlim((z_min, z_max))
+
+        # ----------------------------------
         # TODO: Remove this later
         from IPython import embed
         embed()
         # exit()
-        #----------------------------------
-
-
+        # ----------------------------------
