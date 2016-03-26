@@ -36,13 +36,13 @@ def rasterize(node_coords, connected_pairs, region, resolution=1):
     return np.vstack((X, node_coords)), np.hstack((reg, region))
 
 
-def plot_skeleton(ax, node_coords, skeleton, mask, mask_kw, other_kw, fast=True):
+def plot_skeleton(ax, node_coords, skeleton, mask, mask_kw, other_kw, fast=True, stride=1):
 
     if not fast:
         n = len(skeleton)
-        for i, (fro, to) in enumerate(skeleton[::2]):
+        for i, (fro, to) in enumerate(skeleton[::stride]):
             if i % 100 == 0:
-                print(i, '/', n)
+                print(i, '/', n/stride)
             node = node_coords[fro]
             conn = node_coords[to]
             if mask[fro] and mask[to]:

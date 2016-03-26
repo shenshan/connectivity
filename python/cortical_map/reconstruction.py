@@ -301,10 +301,13 @@ class OverlapGroup(dj.Computed):
         exit()
         # ----------------------------------
 
-    def plot_schematic(self, fro='L5 MaC', to='L23 DBC'):
+    def plot_schematic(self, fro='L23 MaC', to='L23 BC'):
         cm = plt.cm.get_cmap('viridis')
-        cm._lut[:-3, -1] = np.abs(np.linspace(0, 1.0, cm.N))
+        cm._init()
+        cm._lut[:-3, -1] = np.abs(np.linspace(0, 0.8, cm.N))
 
+        axon_color=sns.xkcd_rgb['neon pink']
+        dendrite_color=sns.xkcd_rgb['bright lavender']
         AXON = (CellRegion() & dict(cell_region_name='axon')).fetch1['cell_region_id']
         DENDRITE = (CellRegion() & dict(cell_region_name='dendrite')).fetch1['cell_region_id']
 
@@ -333,12 +336,12 @@ class OverlapGroup(dj.Computed):
         ax = fig.add_subplot(1, 1, 1, projection='3d')
         x_fro, x_to = X['from'][0], X['to'][0]
         plot_skeleton(ax, x_fro, skeleton['from'][0], region['from'][0] == AXON,
-                      mask_kw=dict(lw=1, ms=2, color=sns.xkcd_rgb['azure'], label=fro + ' axon'),
-                      other_kw=dict(lw=.5, ms=1, color=sns.xkcd_rgb['grey'], label=fro + ' dendrite'), fast=False
+                      mask_kw=dict(lw=1, ms=2, color=axon_color, label=fro + ' axon'),
+                      other_kw=dict(lw=.5, ms=1, color='grey', label=fro + ' dendrite'), fast=False, stride=4
                       )
         plot_skeleton(ax, x_to + delta, skeleton['to'][0], region['to'][0] == DENDRITE,
-                      mask_kw=dict(lw=1, ms=2, color=sns.xkcd_rgb['orange red'], label=to + ' dendrite'),
-                      other_kw=dict(lw=.5, ms=1, color='darkgrey', label=to + ' axon'), fast=False
+                      mask_kw=dict(lw=1, ms=2, color=dendrite_color, label=to + ' dendrite'),
+                      other_kw=dict(lw=.5, ms=1, color='grey', label=to + ' axon'), fast=False, stride=4
                       )
 
         x_fro = spin_shuffle(x_fro, 10)
@@ -348,7 +351,7 @@ class OverlapGroup(dj.Computed):
         x_min, y_min, z_min = tmp.min(axis=0)
         x_max, y_max, z_max = tmp.max(axis=0)
         db = 10
-        bins = (np.arange(x_min, x_max + db, db), np.arange(y_min, y_max + db, db))
+        bins = (np.arange(x_min, x_max + db, db), np.arange(y_min, y_max + db, db), np.arange(z_min, z_max + db, db))
 
         H_from, _, _ = np.histogram2d(x_fro[:, 0], x_fro[:, 1], bins=bins)
         H_to, _, _ = np.histogram2d(x_to[:, 0], x_to[:, 1], bins=bins)
@@ -356,13 +359,30 @@ class OverlapGroup(dj.Computed):
         H_from /= db ** 3
         x, y = np.meshgrid(*map(lambda x: 0.5 * (x[1:] + x[:-1]), bins))
 
-        cset = ax.contourf(x.T, y.T, np.log(1e-4 + H_from * H_to), 20, zdir='z', offset=z_min, cmap=cm)
+        f = (H_from*H_to).sum(axis=0)
+        t = bins[1]
+        t = 0.5*(t[1:]+t[:-1])
+        f = f/f.max()*200
+        ax.plot(0*t, t, f+z_max, color='k', lw=2)
+
+        H = np.log(1e-2 + H_from * H_to)
+        #H[H <= np.percentile(H.ravel(), 1)] = np.nan
+        cset = ax.contourf(x.T, y.T, H , 10, zdir='z', offset=z_max, cmap=cm)
+        matplotlib.rcParams['contour.negative_linestyle'] = 'solid'
+        cset = ax.contour(x.T, y.T, np.log(1e-1 + H_from), 5, zdir='z', offset=z_min, colors=axon_color)
+        cset = ax.contour(x.T, y.T, np.log(1e-1 + H_to), 5, zdir='z', offset=z_min, colors=dendrite_color)
 
         x,z = np.meshgrid(np.linspace(x_min, x_max, 3), np.linspace(z_min, z_max, 3))
-        ax.plot_surface(x,0*x-15, z, color='silver', alpha=.2)
-        ax.plot_surface(x,0*x-15+300, z, color='silver', alpha=.2)
+        ax.plot_surface(x,0*x-15, z, color='silver', alpha=.1)
+        ax.plot_surface(x,0*x-15+300, z, color='silver', alpha=.1)
+        y,z = np.meshgrid(np.linspace(-15, 300-15, 3), np.linspace(z_min, z_max, 3))
+        ax.plot_surface(0*y+x_max,y, z, color='silver', alpha=.1)
+        ax.plot_surface(0*y+x_min,y, z, color='silver', alpha=.1)
         ax.set_zlim((z_min, z_max))
-
+        ax.set_aspect(1)
+        ax.view_init(elev=29, azim=-59)
+        ax.axis('equal')
+        ax.axis('off')
         # ----------------------------------
         # TODO: Remove this later
         from IPython import embed
