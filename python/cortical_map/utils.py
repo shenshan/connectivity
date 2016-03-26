@@ -1,14 +1,14 @@
-import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-import seaborn as sns
-from matplotlib.colors import Normalize
-from matplotlib.colorbar import ColorbarBase
-from matplotlib.cm import ScalarMappable
-from matplotlib.pyplot import fill, cm, Rectangle
+import numpy as np
 import os
-from scipy.spatial import ConvexHull, Delaunay
+import seaborn as sns
+from matplotlib.cm import ScalarMappable
+from matplotlib.colorbar import ColorbarBase
+from matplotlib.colors import Normalize
+from matplotlib.pyplot import fill, cm, Rectangle
 from matplotlib.tri import Triangulation
+from mpl_toolkits.mplot3d import Axes3D
+from scipy.spatial import ConvexHull, Delaunay
 
 
 def rasterize(node_coords, connected_pairs, region, resolution=1):
@@ -37,12 +37,24 @@ def rasterize(node_coords, connected_pairs, region, resolution=1):
 
 
 def plot_skeleton(ax, node_coords, skeleton, mask, mask_kw, other_kw, fast=True, stride=1):
+    """
+    Plots cell skeleton in given axes. Mask can be used to mark different regions. Two keyword dictionaries
+    control how different regions are plotted.
 
+    :param ax: axis handle
+    :param node_coords: node locations
+    :param skeleton: connectivity pairs
+    :param mask: masks for region specificity (same length as node_coords)
+    :param mask_kw: plotting kwargs for mask points
+    :param other_kw: plotting kwargs for ~mask points
+    :param fast: plot only points, not connections
+    :param stride: skip every stride connection when plotting connections
+    """
     if not fast:
         n = len(skeleton)
         for i, (fro, to) in enumerate(skeleton[::stride]):
             if i % 100 == 0:
-                print(i, '/', n/stride)
+                print(i, '/', n / stride)
             node = node_coords[fro]
             conn = node_coords[to]
             if mask[fro] and mask[to]:
@@ -226,7 +238,12 @@ def layer(name):
             return 4
 
 
-def load_data(transpose=False, collapse=None, remove=None):
+def load_data():
+    """
+    Loads Xioalong's connectivity matrix.
+
+    :return: labels, K, N
+    """
     path = '/'.join(os.path.realpath(__file__).split('/')[:-1])
     with open(path + '/files/matrix09112015.csv', 'r') as fid:
         labels = [e.strip() for e in fid.readline().split(',')[1:]]
@@ -235,34 +252,4 @@ def load_data(transpose=False, collapse=None, remove=None):
             K.append([list(map(float, e.strip().split('/')))[0] for e in l.split(',')[1:]])
             N.append([list(map(float, e.strip().split('/')))[1] for e in l.split(',')[1:]])
     layers = [layer(name) for name in labels]
-    K = np.asarray(K)
-    N = np.asarray(N)
-
-    if collapse is not None:
-        for k, v in collapse.items():
-            idx = list(sorted([labels.index(e) for e in v]))
-            i = idx[0]
-            labels[i] = k
-            K[i, :] = K[idx, :].sum(axis=0)
-            K[:, i] = K[:, idx].sum(axis=1)
-            N[i, :] = N[idx, :].sum(axis=0)
-            N[:, i] = N[:, idx].sum(axis=1)
-            K = np.delete(K, idx[1:], axis=0)
-            K = np.delete(K, idx[1:], axis=1)
-            N = np.delete(N, idx[1:], axis=0)
-            N = np.delete(N, idx[1:], axis=1)
-            labels = [labels[i] for i in range(len(labels)) if i not in idx[1:]]
-            layers = [layers[i] for i in range(len(layers)) if i not in idx[1:]]
-    if remove is not None:
-        idx = list(sorted([labels.index(e) for e in remove]))
-        K = np.delete(K, idx, axis=0)
-        K = np.delete(K, idx, axis=1)
-        N = np.delete(N, idx, axis=0)
-        N = np.delete(N, idx, axis=1)
-        labels = [labels[i] for i in range(len(labels)) if i not in idx]
-        layers = [layers[i] for i in range(len(layers)) if i not in idx]
-
-    if transpose:
-        return labels, layers, K.T, N.T
-    else:
-        return labels, layers, K, N
+    return labels, np.asarray(K), np.asarray(N)

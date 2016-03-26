@@ -96,7 +96,7 @@ class PaperConnectivity(dj.Lookup):
 
     @property
     def contents(self):
-        labels, layers, K, N = load_data(transpose=False)
+        labels, K, N = load_data()
         for (i, post), (j, pre) in product(enumerate(labels), enumerate(labels)):
             yield dict(cell_type_from=pre, cell_type_to=post, k=K[i, j], n=N[i, j], p=K[i, j] / N[i, j])
 
@@ -155,9 +155,9 @@ class OverlapGroup(dj.Computed):
             cells[role] = (conn.ConnectMembership() * conn.Cell()
                            & dict(role=role, cell_layer=layer, cell_type_morph=morph)
                            ).project(**{('cell_id_' + role): 'cell_id'})
-            X[role], region[role] = OverlapGroup.load_cells(Tree() * CellType()
-                                                            & dict(layer=layer, cell_type_morph=morph),
-                                                            resolution=raster_resolution, correct_cut=cut_compensation)
+            X[role], region[role], _ = load_cells(Tree() * CellType() & dict(layer=layer, cell_type_morph=morph),
+                                                  resolution=raster_resolution,
+                                                  correct_cut=cut_compensation)
 
         if not conn.Distance() * cells['from'] * cells['to']:
             self.insert1(key)
@@ -201,8 +201,7 @@ class OverlapGroup(dj.Computed):
                                            bin_width, delta)
 
             # compute bin centers along y-axis and only get positive side
-            y = E[1]
-            y = 0.5 * (y[1:] + y[:-1])
+            y = 0.5 * (E[1][1:] + E[1][:-1])
             idx = y > 0
 
             # marginalize density
@@ -214,56 +213,7 @@ class OverlapGroup(dj.Computed):
             key['d'] = y[idx]
             part.insert1(key)
 
-    @staticmethod
-    def load_cells(trees, resolution=.5, correct_cut=False, stack=True):
-        """
-        Loads cells from the database
-        :param cell_type: string containing layer and cell type morphology
-        :param resolution: resolution for rasterization (default = .5 mu)
-        :return: rasterized 3d points, region labels
-        """
-        cells = []
-        regions = []
-        pairs = []
-        CELLBODY = (CellRegion() & dict(cell_region_name='cellbody')).fetch1['cell_region_id']
-
-        for k, node_coords, connected_pairs, region in \
-                zip(*trees.fetch[dj.key, 'node_coords', 'connected_pairs', 'node_region']):
-            node_coords = bugfix_reshape(node_coords)
-            node_coords[:, [1, 2]] = node_coords[:,
-                                     [2, 1]]
-
-            connected_pairs = bugfix_reshape(connected_pairs.astype(int)) - 1  # matlab to python index shift
-            region = region.squeeze()
-            if not np.any(region == CELLBODY):
-                print(k, 'has no cellbody')
-                continue
-            mu = np.mean(node_coords[region == CELLBODY, :], axis=0)
-            node_coords -= mu
-
-            if resolution is not None:
-                X, region = rasterize(node_coords, connected_pairs, region, resolution)
-            else:
-                X = node_coords
-
-            if correct_cut:
-                ymax = X[:, 1].max()
-                idx = X[:, 1] <= -ymax
-                tmp = X[idx, :]
-                tmp[:, 1] *= -1
-                X = np.vstack((X, tmp))
-                region = np.hstack((region, region[idx]))
-
-            cells.append(X)
-            regions.append(region)
-            pairs.append(connected_pairs)
-        if stack:
-            return np.vstack(cells), np.hstack(regions)
-        else:
-            return cells, regions, pairs
-
     def plot_correction(self, density_param_id=1, cut_distance=15):
-        # bin_width = (DensityParameters() & dict(density_param_id=density_param_id)).fetch1['bin_width']
         rel_correction = (self.OrthoOverlapDensity() & dict(density_param_id=density_param_id)) \
                          * CellNameTranslation().project(cell_type_from='shan', pre='paper', un1='xiaolong') \
                          * CellNameTranslation().project(cell_type_to='shan', post='paper', un2='xiaolong')
@@ -302,13 +252,13 @@ class OverlapGroup(dj.Computed):
         exit()
         # ----------------------------------
 
-    def plot_schematic(self, fro='L23 MaC', to='L23 BC'):
+    def plot_schematic(self, filename_base, fro='L23 MaC', to='L23 BC'):
         cm = plt.cm.get_cmap('bwr')
         cm._init()
         cm._lut[:-3, -1] = np.abs(np.linspace(0, 1.0, cm.N))
 
-        axon_color=sns.xkcd_rgb['azure']
-        dendrite_color=sns.xkcd_rgb['purple pink']
+        axon_color = sns.xkcd_rgb['azure']
+        dendrite_color = sns.xkcd_rgb['purple pink']
         AXON = (CellRegion() & dict(cell_region_name='axon')).fetch1['cell_region_id']
         DENDRITE = (CellRegion() & dict(cell_region_name='dendrite')).fetch1['cell_region_id']
 
@@ -320,18 +270,15 @@ class OverlapGroup(dj.Computed):
             cells[role] = (conn.ConnectMembership() * conn.Cell()
                            & dict(role=role, cell_layer=layer, cell_type_morph=morph)
                            ).project(**{('cell_id_' + role): 'cell_id'})
-            X[role], region[role], skeleton[role] = OverlapGroup.load_cells(Tree() * CellType()
-                                                                            & dict(layer=layer, cell_type_morph=morph),
-                                                                            resolution=None, correct_cut=False,
-                                                                            stack=False)
-            for i in range(len(X[role])):
-
+            X[role], region[role], skeleton[role] = load_cells(Tree() * CellType()
+                                                               & dict(layer=layer, cell_type_morph=morph),
+                                                               resolution=None, correct_cut=False,
+                                                               stack=False)
+            for i in range(len(X[role])):  # flip y axis for easier plotting
                 X[role][i][:, 1] *= -1
 
         keys, delta_x, delta_y = (conn.Distance() * cells['from'] * cells['to']).fetch[dj.key, 'delta_x', 'delta_y']
         offsets = np.c_[delta_x, np.zeros_like(delta_x), delta_y]
-
-        delta = 3*offsets[0]
 
         fig = plt.figure(facecolor='w', dpi=400)
         ax = fig.add_subplot(1, 1, 1, projection='3d', axisbg='w')
@@ -344,10 +291,11 @@ class OverlapGroup(dj.Computed):
                       mask_kw=dict(lw=.8, ms=2, color=dendrite_color, label=to + ' dendrite'),
                       other_kw=dict(lw=.1, ms=1, color='grey', label=to + ' axon'), fast=False, stride=1
                       )
-
+        # make rotationally symmetric
         x_fro = spin_shuffle(x_fro, 10)
         x_to = spin_shuffle(x_to, 10) + delta
 
+        # compute 3d histograms and overlap density
         tmp = np.vstack((x_fro, x_to))
         x_min, y_min, z_min = tmp.min(axis=0)
         x_max, y_max, z_max = tmp.max(axis=0)
@@ -356,59 +304,108 @@ class OverlapGroup(dj.Computed):
                 np.arange(y_min, y_max + db, db),
                 np.arange(z_min, z_max + db, db))
 
-        H_from, _  = np.histogramdd(x_fro, bins=bins)
+        H_from, _ = np.histogramdd(x_fro, bins=bins)
         H_to, __ = np.histogramdd(x_to, bins=bins)
         H_to /= db ** 3
         H_from /= db ** 3
-        x, y = np.meshgrid(*map(lambda x: 0.5 * (x[1:] + x[:-1]), bins[:2]))
 
-
-        f = (H_from*H_to).sum(axis=(0,2))
+        # compute marginal density and scale for plot
+        f = (H_from * H_to).sum(axis=(0, 2))
         t = bins[1]
-        t = 0.5*(t[1:]+t[:-1])
-        f = f/f.max()*200
+        t = 0.5 * (t[1:] + t[:-1])
+        f = f / f.max() * 200
         f += z_max
-        ax.plot(0*t, t, f, color='k', lw=1)
-        idx = (t >= -15) & (t <= 300 -15)
+        ax.plot(0 * t, t, f, color='k', lw=1)
+        idx = (t >= -15) & (t <= 300 - 15)
         t, f = t[idx], f[idx]
+
+        # plot marginal density as filled curve in 3d
         v = []
         for k in range(0, len(t) - 1):
-            v.append(list(zip( 
+            v.append(list(zip(
                 np.zeros(4),
-                [t[k], t[k+1], t[k+1], t[k]],
-                [f[k], f[k+1],   z_max, z_max])))
-        
-        poly3dCollection = Poly3DCollection(v, linewidths=0, facecolors=['slategray'])
+                [t[k], t[k + 1], t[k + 1], t[k]],
+                [f[k], f[k + 1], z_max, z_max])))
 
+        poly3dCollection = Poly3DCollection(v, linewidths=0, facecolors=['slategray'])
         ax.add_collection3d(poly3dCollection)
 
+        # plot single log-densities and log product density
         H_from = H_from.sum(axis=2)
         H_to = H_to.sum(axis=2)
 
         H = np.log(1e-2 + H_from * H_to)
-        #H[H <= np.percentile(H.ravel(), 1)] = np.nan
-        cset = ax.contourf(x.T, y.T, H , 10, zdir='z', offset=z_max, cmap=cm)
-        matplotlib.rcParams['contour.negative_linestyle'] = 'solid'
-        cset = ax.contour(x.T, y.T, np.log(1e-1 + H_from), 5, zdir='z', offset=z_min, colors=axon_color,linewidths=.8,alpha=.5)
-        cset = ax.contour(x.T, y.T, np.log(1e-1 + H_to), 5, zdir='z', offset=z_min+1, colors=dendrite_color, linewidths=.8, alpha=.5)
 
-        x,z = np.meshgrid(np.linspace(x_min, x_max, 3), np.linspace(z_min, z_max, 3))
-        ax.plot_surface(x,0*x-15, z, color='silver', alpha=.1)
-        ax.plot_surface(x,0*x-15+300, z, color='silver', alpha=.1)
-        y,z = np.meshgrid(np.linspace(-15, 300-15, 3), np.linspace(z_min, z_max, 3))
-        ax.plot_surface(0*y+x_max,y, z, color='silver', alpha=.1)
-        ax.plot_surface(0*y+x_min,y, z, color='silver', alpha=.1)
+        x, y = np.meshgrid(*map(lambda x: 0.5 * (x[1:] + x[:-1]), bins[:2]))
+        # H[H <= np.percentile(H.ravel(), 1)] = np.nan
+        ax.contourf(x.T, y.T, H, 10, zdir='z', offset=z_max, cmap=cm)
+        matplotlib.rcParams['contour.negative_linestyle'] = 'solid'
+        ax.contour(x.T, y.T, np.log(1e-1 + H_from), 5, zdir='z', offset=z_min, colors=axon_color, linewidths=.8,
+                   alpha=.5)
+        ax.contour(x.T, y.T, np.log(1e-1 + H_to), 5, zdir='z', offset=z_min + 1, colors=dendrite_color,
+                   linewidths=.8, alpha=.5)
+
+        # plot slice boundaries
+        x, z = np.meshgrid(np.linspace(x_min, x_max, 3), np.linspace(z_min, z_max, 3))
+        ax.plot_surface(x, 0 * x - 15, z, color='silver', alpha=.1)
+        ax.plot_surface(x, 0 * x - 15 + 300, z, color='silver', alpha=.1)
+        y, z = np.meshgrid(np.linspace(-15, 300 - 15, 3), np.linspace(z_min, z_max, 3))
+        ax.plot_surface(0 * y + x_max, y, z, color='silver', alpha=.1)
+        ax.plot_surface(0 * y + x_min, y, z, color='silver', alpha=.1)
+
+        # plot cosmetics
         ax.set_zlim((z_min, z_max))
         ax.set_aspect(1)
         ax.view_init(elev=29, azim=-43)
         ax.axis('equal')
         ax.axis('off')
 
-        for form in ['png','pdf']:
-            fig.savefig('schematic_from_{0}_to_{1}.{2}'.format(fro, to, form))
-        # ----------------------------------
-        # TODO: Remove this later
-        from IPython import embed
-        embed()
-        # exit()
-        # ----------------------------------
+        for form in ['png', 'pdf']:
+            fig.savefig('{3}_from_{0}_to_{1}.{2}'.format(fro, to, form, filename_base))
+
+
+def load_cells(trees, resolution=.5, correct_cut=False, stack=True):
+    """
+    Loads cells from the database
+    :param cell_type: string containing layer and cell type morphology
+    :param resolution: resolution for rasterization (default = .5 mu)
+    :return: rasterized 3d points, region labels
+    """
+    cells = []
+    regions = []
+    pairs = []
+    CELLBODY = (CellRegion() & dict(cell_region_name='cellbody')).fetch1['cell_region_id']
+
+    for k, node_coords, connected_pairs, region in \
+            zip(*trees.fetch[dj.key, 'node_coords', 'connected_pairs', 'node_region']):
+        node_coords = bugfix_reshape(node_coords)
+        node_coords[:, [1, 2]] = node_coords[:, [2, 1]]
+
+        connected_pairs = bugfix_reshape(connected_pairs.astype(int)) - 1  # matlab to python index shift
+        region = region.squeeze()
+        if not np.any(region == CELLBODY):
+            print(k, 'has no cellbody')
+            continue
+        mu = np.mean(node_coords[region == CELLBODY, :], axis=0)
+        node_coords -= mu
+
+        if resolution is not None:
+            X, region = rasterize(node_coords, connected_pairs, region, resolution)
+        else:
+            X = node_coords
+
+        if correct_cut:
+            ymax = X[:, 1].max()
+            idx = X[:, 1] <= -ymax
+            tmp = X[idx, :]
+            tmp[:, 1] *= -1
+            X = np.vstack((X, tmp))
+            region = np.hstack((region, region[idx]))
+
+        cells.append(X)
+        regions.append(region)
+        pairs.append(connected_pairs)
+    if stack:
+        return np.vstack(cells), np.hstack(regions), np.vstack(pairs)
+    else:
+        return cells, regions, pairs
