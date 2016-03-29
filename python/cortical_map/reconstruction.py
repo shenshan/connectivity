@@ -233,15 +233,27 @@ class OverlapGroup(dj.Computed):
 
         gr = df_correction.groupby(['post', 'pre'])
 
-        def q(X):
-            return np.mean(
-                [x[1:].sum() / 2 / x.sum() if x.sum() > 0 else 0 for x in X])  # TODO: replace 1: at some point
+        def q(group):
+            d = np.mean(group.d, axis=0)
+            dd = np.diff(d)[0]
+            lb = d - dd/2
+            idx = lb >= cut_distance
+            return np.mean([x[idx].sum() / 2 / x.sum() if x.sum() > 0 else 0 for x in group.p])
+
+        Q = (1 - gr.apply(q)).reset_index()
+        Q.columns = ['post','pre', 'p']
+        Q = Q.set_index(['post','pre'])
+
+        # def q(X):
+        #     return np.mean(
+        #         [x[1:].sum() / 2 / x.sum() if x.sum() > 0 else 0 for x in X])  # TODO: replace 1: at some point
 
         # D0 = gr.agg({'p': lambda x: np.mean(x, axis=0).sum() * 2})
         # D = gr.agg({'p': lambda x: np.mean(x, axis=0)[1:].sum()})
         # Q = 1 - D / D0
 
-        Q = 1 - gr.agg({'p': q})
+        # Q = 1 - gr.agg({'p': q})
+        print('<b> +- std(b)', (1/Q).mean(), (1/Q).std())
         labels = ['L1 SBC-like', 'L1 eNGC', 'L23 MC', 'L23 NGC', 'L23 BTC', 'L23 BPC', 'L23 DBC', 'L23 BC', 'L23 ChC',
                   'L23 Pyr', 'L5 MC', 'L5 NGC', 'L5 BC', 'L5 SC', 'L5 HEC', 'L5 DC', 'L5 Pyr']
 
