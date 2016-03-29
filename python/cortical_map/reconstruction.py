@@ -1,6 +1,8 @@
 import datajoint as dj
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import interp
+
 from cortical_map.utils import rasterize, plot_cells, spin_shuffle, compute_overlap_density, plot_skeleton
 from . import connectivity as conn
 from itertools import product
@@ -126,6 +128,8 @@ class OverlapGroup(dj.Computed):
     ---
     """
 
+    save_control_figures = False
+
     class OrthoOverlapDensity(dj.Part):
         definition = """
         # overlap densities for a particular cell type pair and distance
@@ -156,9 +160,10 @@ class OverlapGroup(dj.Computed):
             cells[role] = (conn.ConnectMembership() * conn.Cell()
                            & dict(role=role, cell_layer=layer, cell_type_morph=morph)
                            ).project(**{('cell_id_' + role): 'cell_id'})
-            X[role], region[role], _, N[role] = load_cells(Tree() * CellType() & dict(layer=layer, cell_type_morph=morph),
-                                                  resolution=raster_resolution,
-                                                  correct_cut=cut_compensation)
+            X[role], region[role], _, N[role] = load_cells(
+                Tree() * CellType() & dict(layer=layer, cell_type_morph=morph),
+                resolution=raster_resolution,
+                correct_cut=cut_compensation)
 
         if not conn.Distance() * cells['from'] * cells['to']:
             self.insert1(key)
@@ -168,23 +173,23 @@ class OverlapGroup(dj.Computed):
         keys, delta_x, delta_y = (conn.Distance() * cells['from'] * cells['to']).fetch[dj.key, 'delta_x', 'delta_y']
         offsets = np.c_[delta_x, -cell_offset * np.ones_like(delta_x), delta_y]
 
-        # save control figures
-        # if len(delta_x) > 1:
-        #     sns.set(style="ticks")
-        #     sns.jointplot(delta_x, delta_y, kind="scatter")
-        #     plt.gca().set_xlabel(r'$\Delta$ lateral')
-        #     plt.gca().set_ylabel(r'$\Delta$ depth')
-        #     plt.gcf().suptitle('{cell_type_from} to {cell_type_to}'.format(**key))
-        #     plt.gcf().tight_layout()
-        #     plt.gcf().savefig('{cell_type_from}_to_{cell_type_to}_deltahist.png'.format(**key))
-        #
-        #     plt.close(plt.gcf())
-        #
-        # fig, ax = plot_cells(X['from'], X['to'], offsets[0],
-        #                      dict(color=sns.xkcd_rgb['neon pink'], label=key['cell_type_from']),
-        #                      dict(color=sns.xkcd_rgb['neon blue'], label=key['cell_type_to']))
-        # fig.savefig('{cell_type_from}_to_{cell_type_to}.png'.format(**key))
-        # plt.close(fig)
+        if self.save_control_figures:
+            if len(delta_x) > 1:
+                sns.set(style="ticks")
+                sns.jointplot(delta_x, delta_y, kind="scatter")
+                plt.gca().set_xlabel(r'$\Delta$ lateral')
+                plt.gca().set_ylabel(r'$\Delta$ depth')
+                plt.gcf().suptitle('{cell_type_from} to {cell_type_to}'.format(**key))
+                plt.gcf().tight_layout()
+                plt.gcf().savefig('{cell_type_from}_to_{cell_type_to}_deltahist.png'.format(**key))
+
+                plt.close(plt.gcf())
+
+            fig, ax = plot_cells(X['from'], X['to'], offsets[0],
+                                 dict(color=sns.xkcd_rgb['neon pink'], label=key['cell_type_from']),
+                                 dict(color=sns.xkcd_rgb['neon blue'], label=key['cell_type_to']))
+            fig.savefig('{cell_type_from}_to_{cell_type_to}.png'.format(**key))
+            plt.close(fig)
 
         # shuffle by rotation around z-axis and increase data volume
         X['from'] = spin_shuffle(X['from'], copy=multiplication_factor)
@@ -213,7 +218,7 @@ class OverlapGroup(dj.Computed):
             key['d'] = y[idx]
             part.insert1(key)
 
-    def plot_correction(self, density_param_id=1, cut_distance=15):
+    def plot_correction(self, filename, density_param_id=1, cut_distance=15):
         rel_correction = (self.OrthoOverlapDensity() & dict(density_param_id=density_param_id)) \
                          * CellNameTranslation().project(cell_type_from='shan', pre='paper', un1='xiaolong') \
                          * CellNameTranslation().project(cell_type_to='shan', post='paper', un2='xiaolong')
@@ -224,18 +229,19 @@ class OverlapGroup(dj.Computed):
         df_correction = pd.DataFrame(rel_correction.fetch())
         df_paper = pd.DataFrame(rel_prob.fetch())
 
-        P = df_paper.groupby(['post', 'pre']).agg({'p': lambda x: x})
+        P = df_paper.groupby(['post', 'pre']).agg({'p': lambda x: x}).copy()
 
         gr = df_correction.groupby(['post', 'pre'])
 
         def q(X):
-            return np.mean([x[1:].sum()/2/x.sum() for x in X])
+            return np.mean(
+                [x[1:].sum() / 2 / x.sum() if x.sum() > 0 else 0 for x in X])  # TODO: replace 1: at some point
 
         # D0 = gr.agg({'p': lambda x: np.mean(x, axis=0).sum() * 2})
-        # D = gr.agg({'p': lambda x: np.mean(x, axis=0)[1:].sum()})  # TODO: replace 1: at some point
+        # D = gr.agg({'p': lambda x: np.mean(x, axis=0)[1:].sum()})
         # Q = 1 - D / D0
 
-        Q = 1 - gr.agg({'p':q})
+        Q = 1 - gr.agg({'p': q})
         labels = ['L1 SBC-like', 'L1 eNGC', 'L23 MC', 'L23 NGC', 'L23 BTC', 'L23 BPC', 'L23 DBC', 'L23 BC', 'L23 ChC',
                   'L23 Pyr', 'L5 MC', 'L5 NGC', 'L5 BC', 'L5 SC', 'L5 HEC', 'L5 DC', 'L5 Pyr']
 
@@ -244,16 +250,24 @@ class OverlapGroup(dj.Computed):
         P2 = P2.unstack().loc[labels][list(product(['p'], labels))]
 
         fig, axes = plot_connections(P, P2, vmax=1, cmin=0, cmax=1)
-        axes['matrix'][0].set_title('uncorrected')
-        axes['matrix'][1].set_title('corrected')
+        axes['matrix'][0].set_title('uncorrected', fontsize=6)
+        axes['matrix'][1].set_title('corrected', fontsize=6)
         fig.tight_layout()
 
-        # ----------------------------------
-        # TODO: Remove this later
-        from IPython import embed
-        embed()
-        exit()
-        # ----------------------------------
+        p2 = df_paper.merge((1 / Q).reset_index(), on=['post', 'pre'], suffixes=('_prop', '_correction'))
+        axes['correlation'].plot(p2.p_prop, p2.p_correction, 'ow', ms=2, color='slategray', lw=1)
+        axes['correlation'].set_xlim((-0.05, 0.7))
+        axes['correlation'].set_ylim((0.95, 1.75))
+
+        axes['correlation'].set_yticks([1., 1.3, 1.6])
+        axes['correlation'].set_xticks(np.arange(0, 1, .2))
+        for _, i in axes['correlation'].spines.items():
+            i.set_linewidth(0.5)
+        axes['correlation'].tick_params(axis='both', which='major', labelsize=6, length=3, width=.5)
+        axes['correlation'].set_xlabel('connection probability', fontsize=6)
+        axes['correlation'].set_ylabel('correction', fontsize=6)
+        sns.despine(ax=axes['correlation'], offset=3, trim=True)
+        fig.savefig(filename)
 
     def plot_schematic(self, filename_base, fro='L23 MaC', to='L23 BC'):
         cm = plt.cm.get_cmap('bwr')
@@ -273,25 +287,26 @@ class OverlapGroup(dj.Computed):
             cells[role] = (conn.ConnectMembership() * conn.Cell()
                            & dict(role=role, cell_layer=layer, cell_type_morph=morph)
                            ).project(**{('cell_id_' + role): 'cell_id'})
-            X[role], region[role], skeleton[role] = load_cells(Tree() * CellType()
-                                                               & dict(layer=layer, cell_type_morph=morph),
-                                                               resolution=None, correct_cut=False,
-                                                               stack=False)
+            X[role], region[role], skeleton[role], _ = load_cells(Tree() * CellType()
+                                                                  & dict(layer=layer, cell_type_morph=morph),
+                                                                  resolution=None, correct_cut=False,
+                                                                  stack=False)
             for i in range(len(X[role])):  # flip y axis for easier plotting
                 X[role][i][:, 1] *= -1
 
         keys, delta_x, delta_y = (conn.Distance() * cells['from'] * cells['to']).fetch[dj.key, 'delta_x', 'delta_y']
         offsets = np.c_[delta_x, np.zeros_like(delta_x), delta_y]
+        delta = 3 * offsets[0]
 
         fig = plt.figure(facecolor='w', dpi=400)
         ax = fig.add_subplot(1, 1, 1, projection='3d', axisbg='w')
         x_fro, x_to = X['from'][0], X['to'][0]
         plot_skeleton(ax, x_fro, skeleton['from'][0], region['from'][0] == AXON,
-                      mask_kw=dict(lw=.8, ms=2, color=axon_color, label=fro + ' axon'),
+                      mask_kw=dict(lw=.2, ms=2, color=axon_color, label=fro + ' axon'),
                       other_kw=dict(lw=.1, ms=1, color='grey', label=fro + ' dendrite'), fast=False, stride=1
                       )
         plot_skeleton(ax, x_to + delta, skeleton['to'][0], region['to'][0] == DENDRITE,
-                      mask_kw=dict(lw=.8, ms=2, color=dendrite_color, label=to + ' dendrite'),
+                      mask_kw=dict(lw=.2, ms=2, color=dendrite_color, label=to + ' dendrite'),
                       other_kw=dict(lw=.1, ms=1, color='grey', label=to + ' axon'), fast=False, stride=1
                       )
         # make rotationally symmetric
@@ -318,19 +333,22 @@ class OverlapGroup(dj.Computed):
         t = 0.5 * (t[1:] + t[:-1])
         f = f / f.max() * 200
         f += z_max
-        ax.plot(0 * t, t, f, color='k', lw=1)
+        idx = (t >= -125) & (t <= 300 - 15)
+        ax.plot(0 * t[idx], t[idx], f[idx], color='k', lw=1)
+        t1 = np.linspace(-15,300-15, 100)
+        f1 = interp(t1, t,f)
         idx = (t >= -15) & (t <= 300 - 15)
-        t, f = t[idx], f[idx]
-
+        t, f = t1, f1 #t[idx], f[idx]
         # plot marginal density as filled curve in 3d
         v = []
+
         for k in range(0, len(t) - 1):
             v.append(list(zip(
                 np.zeros(4),
                 [t[k], t[k + 1], t[k + 1], t[k]],
                 [f[k], f[k + 1], z_max, z_max])))
 
-        poly3dCollection = Poly3DCollection(v, linewidths=0, facecolors=['slategray'])
+        poly3dCollection = Poly3DCollection(v, linewidths=0, facecolors=sns.xkcd_rgb['golden rod'], alpha=.5)
         ax.add_collection3d(poly3dCollection)
 
         # plot single log-densities and log product density
@@ -340,8 +358,10 @@ class OverlapGroup(dj.Computed):
         H = np.log(1e-2 + H_from * H_to)
 
         x, y = np.meshgrid(*map(lambda x: 0.5 * (x[1:] + x[:-1]), bins[:2]))
-        # H[H <= np.percentile(H.ravel(), 1)] = np.nan
-        ax.contourf(x.T, y.T, H, 10, zdir='z', offset=z_max, cmap=cm)
+        vs = [-4.75, -4.25, -3.75, -3.25, -2.75, -2.25, -1.75, -1.25, -0.75, -0.25, 0.25]
+        H[H < vs[1]] = np.nan
+        ax.contourf(x.T, y.T, H, vs, zdir='z', offset=z_max, cmap=cm)
+
         matplotlib.rcParams['contour.negative_linestyle'] = 'solid'
         ax.contour(x.T, y.T, np.log(1e-1 + H_from), 5, zdir='z', offset=z_min, colors=axon_color, linewidths=.8,
                    alpha=.5)

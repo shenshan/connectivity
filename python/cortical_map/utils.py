@@ -183,12 +183,15 @@ def plot_connections(P, Q, vmax=None, cmin=None, cmax=None):
     sns.set_style('whitegrid')
     sns.set_context('paper')
     fig = plt.figure(figsize=(4.6, 3.5), dpi=400)
-    gs = plt.GridSpec(5, 10)
+    gs = plt.GridSpec(10, 11)
 
-    axes = [fig.add_subplot(gs[1:, :5]), fig.add_subplot(gs[1:, 5:])]
+    axes = [fig.add_subplot(gs[2:, 1:6]), fig.add_subplot(gs[2:, 6:])]
     labels = list(P.index)
     n = len(labels)
-    ax_color = fig.add_subplot(gs[0, 1:-1])
+    ax_color = fig.add_subplot(gs[:2, :6])
+
+    with sns.axes_style('ticks'):
+        ax_correlation = fig.add_subplot(gs[:3, 6:])
 
     for p, ax in zip([P, Q], axes):
         p = p.as_matrix()
@@ -201,11 +204,11 @@ def plot_connections(P, Q, vmax=None, cmin=None, cmax=None):
         ax.set_xticklabels(labels, rotation=90)
         ax.set_xlim((-1, n))
         ax.set_ylim((-1, n))
-        ax.set_xlabel('presynaptic')
+        ax.set_xlabel('presynaptic', fontsize=6)
 
-    cbar = ColorbarBase(ax_color, cmap=cmap, norm=cnorm, orientation='horizontal', label='connection probability')
+    cbar = ColorbarBase(ax_color, cmap=cmap, norm=cnorm, orientation='horizontal')
 
-    axes[0].set_ylabel('postsynaptic')
+    axes[0].set_ylabel('postsynaptic', fontsize=6)
     axes[0].set_yticklabels(labels)
     axes[1].set_yticklabels([])
     for ax in axes:
@@ -215,12 +218,14 @@ def plot_connections(P, Q, vmax=None, cmin=None, cmax=None):
         for _, i in ax.spines.items():
             i.set_linewidth(0.3)
     ax_color.tick_params(axis='both', which='major', labelsize=6)
+    ax_color.set_xlabel('connection probability', fontsize=6)
+
     for _, i in ax_color.spines.items():
         i.set_linewidth(0)
 
     fig.tight_layout()
 
-    return fig, {'matrix': axes, 'color': ax_color}
+    return fig, {'matrix': axes, 'color': ax_color, 'correlation':ax_correlation}
 
 
 def layer(name):
