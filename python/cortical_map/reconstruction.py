@@ -236,13 +236,13 @@ class OverlapGroup(dj.Computed):
         def q(group):
             d = np.mean(group.d, axis=0)
             dd = np.diff(d)[0]
-            lb = d - dd/2
+            lb = d - dd / 2
             idx = lb >= cut_distance
             return np.mean([x[idx].sum() / 2 / x.sum() if x.sum() > 0 else 0 for x in group.p])
 
         Q = (1 - gr.apply(q)).reset_index()
-        Q.columns = ['post','pre', 'p']
-        Q = Q.set_index(['post','pre'])
+        Q.columns = ['post', 'pre', 'p']
+        Q = Q.set_index(['post', 'pre'])
 
         # def q(X):
         #     return np.mean(
@@ -253,7 +253,7 @@ class OverlapGroup(dj.Computed):
         # Q = 1 - D / D0
 
         # Q = 1 - gr.agg({'p': q})
-        print('<b> +- std(b)', (1/Q).mean(), (1/Q).std())
+        print('<b> +- std(b)', (1 / Q).mean(), (1 / Q).std())
         labels = ['L1 SBC-like', 'L1 eNGC', 'L23 MC', 'L23 NGC', 'L23 BTC', 'L23 BPC', 'L23 DBC', 'L23 BC', 'L23 ChC',
                   'L23 Pyr', 'L5 MC', 'L5 NGC', 'L5 BC', 'L5 SC', 'L5 HEC', 'L5 DC', 'L5 Pyr']
 
@@ -280,6 +280,37 @@ class OverlapGroup(dj.Computed):
         axes['correlation'].set_ylabel('correction', fontsize=6)
         sns.despine(ax=axes['correlation'], offset=3, trim=True)
         fig.savefig(filename)
+
+    def overlap_sanity(self, filename, density_param_id=1):
+        rel_correction = (self.OrthoOverlapDensity() * conn.Distance() & dict(density_param_id=density_param_id)) \
+                         * CellNameTranslation().project(cell_type_from='shan', pre='paper', un1='xiaolong') \
+                         * CellNameTranslation().project(cell_type_to='shan', post='paper', un2='xiaolong')
+        rel_prob = PaperConnectivity() * CellNameTranslation().project(cell_type_from='xiaolong', pre='paper',
+                                                                       un3='shan') \
+                   * CellNameTranslation().project(cell_type_to='xiaolong', post='paper', un4='shan')
+
+        df_correction = pd.DataFrame(rel_correction.fetch())
+        df_paper = pd.DataFrame(rel_prob.fetch())
+        df = df_correction.merge(df_paper, on=['post', 'pre'])
+        df2 = df.ix[:, ('p_y', 'distance', 'q', 'pre', 'post')]
+        df2['q'] = [x[1:].sum() / x.sum() / 2 if x.sum() > 0 else 0 for x in df.p_x]
+        for field in ('p_y', 'distance', 'q'):
+            df2[field] = np.asarray(df2[field]).astype(np.float64)
+        gr = df2.groupby(['post', 'pre'])
+        mu = gr.mean()
+        s = gr.std()
+
+        with sns.axes_style('whitegrid'):
+            fig, ax = plt.subplots()
+        cb = ax.scatter(mu.distance, s.q, c=mu.p_y, cmap=plt.cm.get_cmap('viridis'), s=50)
+        plt.colorbar(cb)
+        ax.set_ylim((0,.3))
+        ax.set_ylabel('std of correction factor')
+        ax.set_xlabel('mean distance between cell types')
+        ax.set_title("Color is Xiaolong's connection probability")
+
+        fig.savefig(filename)
+
 
     def plot_schematic(self, filename_base, fro='L23 MaC', to='L23 BC'):
         cm = plt.cm.get_cmap('bwr')
@@ -347,10 +378,10 @@ class OverlapGroup(dj.Computed):
         f += z_max
         idx = (t >= -125) & (t <= 300 - 15)
         ax.plot(0 * t[idx], t[idx], f[idx], color='k', lw=1)
-        t1 = np.linspace(-15,300-15, 100)
-        f1 = interp(t1, t,f)
+        t1 = np.linspace(-15, 300 - 15, 100)
+        f1 = interp(t1, t, f)
         idx = (t >= -15) & (t <= 300 - 15)
-        t, f = t1, f1 #t[idx], f[idx]
+        t, f = t1, f1  # t[idx], f[idx]
         # plot marginal density as filled curve in 3d
         v = []
 
