@@ -15,10 +15,11 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 schema = dj.schema('shan_reconstruction', locals())
 
-
+schema.spawn_missing_classes()
 def bugfix_reshape(a):
     return a.ravel(order='C').reshape(a.shape, order='F')
 
+raise DeprecationWarning('The module reconstruction is outdated and will be removed in the future. Do not use it! Use morphology instead!')
 
 @schema
 class CellRegion(dj.Lookup):
@@ -243,7 +244,6 @@ class OverlapGroup(dj.Computed):
         Q = (1 - gr.apply(q)).reset_index()
         Q.columns = ['post', 'pre', 'p']
         Q = Q.set_index(['post', 'pre'])
-
         # def q(X):
         #     return np.mean(
         #         [x[1:].sum() / 2 / x.sum() if x.sum() > 0 else 0 for x in X])  # TODO: replace 1: at some point
@@ -268,6 +268,7 @@ class OverlapGroup(dj.Computed):
 
         p2 = df_paper.merge((1 / Q).reset_index(), on=['post', 'pre'], suffixes=('_prop', '_correction'))
         axes['correlation'].plot(p2.p_prop, p2.p_correction, 'ow', ms=2, color='slategray', lw=1)
+        print(np.corrcoef(p2.p_prop, p2.p_correction))
         axes['correlation'].set_xlim((-0.05, 0.7))
         axes['correlation'].set_ylim((0.95, 1.75))
 

@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import itertools
 import os
 import seaborn as sns
 from matplotlib.cm import ScalarMappable
@@ -116,6 +117,28 @@ def plot_cells(X, Y, delta, param1, param2, threed=False):
     return fig, ax
 
 
+def plot_projections(X, Y, delta, param1, param2):
+    Y = Y + delta
+    sns.set_style('whitegrid')
+    fig, ax = plt.subplots(1, 3, figsize=(12, 4), dpi=400, sharey=True, sharex=True)
+
+    ax_labels = dict(
+        enumerate([r'x (medial-lateral) [$\mu$m]', r'y (perpendicular to cut) [$\mu$m]', r'z (depth) [$\mu$m]']))
+    for k, (i, j) in enumerate(itertools.combinations([0, 1, 2], r=2)):
+        ax[k].plot(X[:, i], X[:, j], '.', ms=.5, **param1)
+        ax[k].plot(Y[:, i], Y[:, j], '.', ms=.5, **param2)
+        ax[k].set_xlabel(ax_labels[i])
+        ax[k].set_ylabel(ax_labels[j])
+
+
+    ax[0].set_aspect(1)
+    lgnd = ax[2].legend()
+    for h in lgnd.legendHandles:
+        h._legmarker.set_markersize(15)
+    fig.tight_layout()
+    return fig, ax
+
+
 def compute_overlap_density(X, Y, bin_width, delta, n):
     """
     Computes the overlap density between X and Y shifted by dist along the x axis.
@@ -225,7 +248,7 @@ def plot_connections(P, Q, vmax=None, cmin=None, cmax=None):
 
     fig.tight_layout()
 
-    return fig, {'matrix': axes, 'color': ax_color, 'correlation':ax_correlation}
+    return fig, {'matrix': axes, 'color': ax_color, 'correlation': ax_correlation}
 
 
 def layer(name):
